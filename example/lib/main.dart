@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -52,10 +51,19 @@ class GridDemoPage extends StatefulWidget {
 class _GridDemoPageState extends State<GridDemoPage> {
   late int _itemCount = widget.itemCount;
   int _columns = 3;
+  bool _reorderable = false;
+  late List<int> _items = List.generate(_itemCount, (i) => i);
 
   @override
   void dispose() {
     super.dispose();
+  }
+
+  void _updateItemCount(int count) {
+    setState(() {
+      _itemCount = count;
+      _items = List.generate(count, (i) => i);
+    });
   }
 
   @override
@@ -63,7 +71,7 @@ class _GridDemoPageState extends State<GridDemoPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          '${_fmt(_itemCount)} · $_columns col',
+          '${_fmt(_itemCount)} · $_columns col${_reorderable ? ' · Drag' : ''}',
           style: const TextStyle(fontSize: 14),
         ),
         actions: [
@@ -82,9 +90,7 @@ class _GridDemoPageState extends State<GridDemoPage> {
           PopupMenuButton<int>(
             icon: const Icon(Icons.format_list_numbered),
             tooltip: 'Item count',
-            onSelected: (count) => setState(() {
-              _itemCount = count;
-            }),
+            onSelected: _updateItemCount,
             itemBuilder: (_) => [
               for (final n in [100, 500, 1000, 5000, 10000, 100000, 1000000])
                 PopupMenuItem(value: n, child: Text('${_fmt(n)} items')),
@@ -93,25 +99,41 @@ class _GridDemoPageState extends State<GridDemoPage> {
         ],
       ),
       body: SmoothGrid(
-        itemCount: _itemCount,
+        itemCount: _items.length,
+        reorderable: _reorderable,
         delegate: SmoothGridDelegate.count(
           crossAxisCount: _columns,
           mainAxisSpacing: 6,
           crossAxisSpacing: 6,
           padding: const EdgeInsets.all(6),
-          itemExtentBuilder: _heightForIndex,
+          itemExtentBuilder: (index) => _heightForIndex(_items[index]),
         ),
         itemBuilder: (context, index) {
-          return SmoothGridTile(child: _ItemCard(index: index));
+          return SmoothGridTile(child: _ItemCard(index: _items[index]));
         },
-        onTap: (index) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Tapped #$index'),
-              duration: const Duration(milliseconds: 400),
-            ),
-          );
+        onReorder: (oldIndex, newIndex) {
+          setState(() {
+            final item = _items.removeAt(oldIndex);
+            // Adjust newIndex after removal
+            final insertAt = newIndex > oldIndex ? newIndex - 1 : newIndex;
+            _items.insert(insertAt, item);
+          });
         },
+        onTap: _reorderable
+            ? null
+            : (index) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Tapped #${_items[index]}'),
+                    duration: const Duration(milliseconds: 400),
+                  ),
+                );
+              },
+      ),
+      floatingActionButton: FloatingActionButton.small(
+        onPressed: () => setState(() => _reorderable = !_reorderable),
+        tooltip: _reorderable ? 'Disable drag' : 'Enable drag',
+        child: Icon(_reorderable ? Icons.lock_open : Icons.drag_indicator),
       ),
     );
   }

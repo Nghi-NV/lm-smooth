@@ -193,8 +193,9 @@ class _SmoothGridState extends State<SmoothGrid> {
   Widget _buildItem(BuildContext context, int index) {
     Widget child = widget.itemBuilder(context, index);
 
-    // Wrap with gesture detectors if needed
-    if (widget.onTap != null || widget.onLongPress != null) {
+    // Wrap with gesture detectors if needed (only when NOT reorderable)
+    if (!widget.reorderable &&
+        (widget.onTap != null || widget.onLongPress != null)) {
       child = GestureDetector(
         onTap: widget.onTap != null ? () => widget.onTap!(index) : null,
         onLongPress: widget.onLongPress != null
@@ -204,6 +205,71 @@ class _SmoothGridState extends State<SmoothGrid> {
       );
     }
 
+    // Wrap with drag-and-drop when reorderable
+    if (widget.reorderable) {
+      child = _buildDraggableItem(context, index, child);
+    }
+
     return child;
   }
+
+  Widget _buildDraggableItem(BuildContext context, int index, Widget child) {
+    return LongPressDraggable<int>(
+      data: index,
+      delay: const Duration(milliseconds: 300),
+      hapticFeedbackOnStart: true,
+      // Ghost feedback shown while dragging
+      feedback: SizedBox(
+        width: _cache.totalItems > index
+            ? _cache.getRaw(index).w
+            : 120,
+        height: _cache.totalItems > index
+            ? _cache.getRaw(index).h
+            : 120,
+        child: Opacity(
+          opacity: 0.85,
+          child: Transform.scale(
+            scale: 1.05,
+            child: child,
+          ),
+        ),
+      ),
+      // Dim the original item while dragging
+      childWhenDragging: Opacity(
+        opacity: 0.3,
+        child: child,
+      ),
+      child: DragTarget<int>(
+        onWillAcceptWithDetails: (details) => details.data != index,
+        onAcceptWithDetails: (details) {
+          final oldIndex = details.data;
+          widget.onReorder?.call(oldIndex, index);
+        },
+        builder: (context, candidateData, rejectedData) {
+          // Highlight when a draggable hovers over this target
+          if (candidateData.isNotEmpty) {
+            return Container(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: const Color(0xFF6750A4),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: child,
+            );
+          }
+          // Wrap with tap handler in reorderable mode
+          if (widget.onTap != null) {
+            return GestureDetector(
+              onTap: () => widget.onTap!(index),
+              child: child,
+            );
+          }
+          return child;
+        },
+      ),
+    );
+  }
 }
+

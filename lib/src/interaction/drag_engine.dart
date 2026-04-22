@@ -63,7 +63,7 @@ class SmoothDragEngine {
       builder: (context) => Positioned(
         left: _ghostX - getItemWidth(index) / 2,
         top: _ghostY - getItemHeight(index) / 2,
-        child: Material(
+        child: DragGhost(
           elevation: 8,
           shadowColor: const Color(0x40000000),
           borderRadius: BorderRadius.circular(8),
@@ -176,15 +176,15 @@ class SmoothDragEngine {
   }
 }
 
-/// A simple Material-like wrapper for the drag ghost.
-/// Using a simplified version to avoid depending on material.dart.
-class Material extends StatelessWidget {
+/// A simple widget for the drag ghost with elevation shadow.
+/// Named DragGhost to avoid conflict with flutter/material.dart's Material.
+class DragGhost extends StatelessWidget {
   final Widget child;
   final double elevation;
   final Color shadowColor;
   final BorderRadius borderRadius;
 
-  const Material({
+  const DragGhost({
     super.key,
     required this.child,
     this.elevation = 0,
