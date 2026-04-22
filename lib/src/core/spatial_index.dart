@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'layout_cache.dart';
 
 /// Spatial index for fast O(log n) range queries on the layout cache.
@@ -5,19 +7,18 @@ import 'layout_cache.dart';
 /// Given a vertical scroll range [top, bottom], this index finds the
 /// first and last item indices that intersect that range.
 ///
-/// Implementation: binary search on sorted Y offsets within the [LayoutCache].
-/// Items in a masonry layout are NOT sorted by Y globally, but each column
-/// IS sorted. So we maintain per-column sorted indices and merge results.
-///
-/// Simplified approach: since items are added column-by-column in order,
-/// we maintain a sorted "row boundary" list — the Y offset where each
-/// "row band" starts. This gives O(log n) lookup.
+/// Implementation: uses flat [Float64List] + [Int32List] arrays instead
+/// of object lists to eliminate GC pressure. Binary search on sorted Y
+/// offsets, with back-tracking for items that extend past the viewport top.
 class SpatialIndex {
   final LayoutCache _cache;
 
-  /// Sorted list of (y, itemIndex) pairs for binary search.
-  /// This is rebuilt when layout changes.
-  List<_YEntry> _sortedEntries = [];
+  /// Flat arrays for zero-GC sorted entries.
+  /// _sortedY[i] = Y position of the i-th sorted entry.
+  /// _sortedIdx[i] = item index of the i-th sorted entry.
+  Float64List _sortedY = Float64List(0);
+  Int32List _sortedIdx = Int32List(0);
+  int _length = 0;
 
   bool _isDirty = true;
 
@@ -31,19 +32,30 @@ class SpatialIndex {
   /// Rebuild the spatial index from the current layout cache.
   ///
   /// O(n log n) — called once after layout computation.
-  /// For 1M items this takes ~100ms, done on Isolate.
   void rebuild() {
     final n = _cache.totalItems;
-    _sortedEntries = List<_YEntry>.generate(
-      n,
-      (i) => _YEntry(_cache.getY(i), i),
-    );
+    if (n == 0) {
+      _length = 0;
+      _isDirty = false;
+      return;
+    }
 
-    // Sort by Y position, then by index for stability
-    _sortedEntries.sort((a, b) {
-      final cmp = a.y.compareTo(b.y);
-      return cmp != 0 ? cmp : a.index.compareTo(b.index);
-    });
+    // Reuse arrays if same size, otherwise allocate new ones
+    if (_sortedY.length != n) {
+      _sortedY = Float64List(n);
+      _sortedIdx = Int32List(n);
+    }
+
+    // Fill arrays
+    for (var i = 0; i < n; i++) {
+      _sortedY[i] = _cache.getY(i);
+      _sortedIdx[i] = i;
+    }
+    _length = n;
+
+    // Sort by Y position using indices array (insertion sort for small n,
+    // otherwise use a simple quicksort-like approach)
+    _sortByY(0, n - 1);
 
     _isDirty = false;
   }
@@ -56,12 +68,11 @@ class SpatialIndex {
   /// O(log n) binary search + O(k) for collecting results.
   ({int start, int end}) queryRange(double top, double bottom) {
     if (_isDirty) rebuild();
-    if (_sortedEntries.isEmpty) return (start: -1, end: -1);
+    if (_length == 0) return (start: -1, end: -1);
 
     // Find first entry where Y + H > top (item's bottom > viewport top)
-    // This means: find items that haven't scrolled past the top
     var startIdx = _lowerBoundTop(top);
-    if (startIdx >= _sortedEntries.length) return (start: -1, end: -1);
+    if (startIdx >= _length) return (start: -1, end: -1);
 
     // Find last entry where Y < bottom (item starts before viewport bottom)
     var endIdx = _upperBoundBottom(bottom);
@@ -71,13 +82,16 @@ class SpatialIndex {
 
     // Convert sorted-entry indices back to item indices
     // We need the min and max item indices in visible range
-    var minItem = _sortedEntries[startIdx].index;
-    var maxItem = _sortedEntries[startIdx].index;
+    var minItem = _sortedIdx[startIdx];
+    var maxItem = minItem;
 
-    for (var i = startIdx; i <= endIdx; i++) {
-      final idx = _sortedEntries[i].index;
-      if (idx < minItem) minItem = idx;
-      if (idx > maxItem) maxItem = idx;
+    for (var i = startIdx + 1; i <= endIdx; i++) {
+      final idx = _sortedIdx[i];
+      if (idx < minItem) {
+        minItem = idx;
+      } else if (idx > maxItem) {
+        maxItem = idx;
+      }
     }
 
     return (start: minItem, end: maxItem);
@@ -90,16 +104,17 @@ class SpatialIndex {
   /// instead of a continuous range.
   List<int> queryVisibleItems(double top, double bottom) {
     if (_isDirty) rebuild();
-    if (_sortedEntries.isEmpty) return const [];
+    if (_length == 0) return const [];
 
     final result = <int>[];
 
-    for (final entry in _sortedEntries) {
-      if (entry.y >= bottom) break; // Past viewport, stop (sorted by Y)
+    for (var i = 0; i < _length; i++) {
+      if (_sortedY[i] >= bottom) break; // Past viewport, stop (sorted by Y)
 
-      final itemBottom = _cache.getBottom(entry.index);
+      final itemIdx = _sortedIdx[i];
+      final itemBottom = _cache.getBottom(itemIdx);
       if (itemBottom > top) {
-        result.add(entry.index);
+        result.add(itemIdx);
       }
     }
 
@@ -107,24 +122,15 @@ class SpatialIndex {
     return result;
   }
 
-  /// Binary search: find first entry index where the item's bottom > [top].
-  ///
-  /// item bottom = entry.y + item height
+  /// Binary search: find first sorted index where the item's bottom > [top].
   int _lowerBoundTop(double top) {
-    // We want items whose bottom edge > top, meaning they're still visible.
-    // Since entries are sorted by Y, we find the first entry where Y could
-    // potentially have bottom > top.
-    //
-    // Conservative: find first entry where Y > top - maxItemHeight.
-    // But we don't know maxItemHeight, so scan from the binary search point.
-
     var lo = 0;
-    var hi = _sortedEntries.length;
+    var hi = _length;
 
-    // Find first entry where Y >= top (but item could start earlier and extend past top)
+    // Find first entry where Y >= top
     while (lo < hi) {
       final mid = (lo + hi) >> 1;
-      if (_sortedEntries[mid].y < top) {
+      if (_sortedY[mid] < top) {
         lo = mid + 1;
       } else {
         hi = mid;
@@ -133,7 +139,7 @@ class SpatialIndex {
 
     // Back up to find items that start before `top` but extend past it
     while (lo > 0) {
-      final prevIdx = _sortedEntries[lo - 1].index;
+      final prevIdx = _sortedIdx[lo - 1];
       if (_cache.getBottom(prevIdx) > top) {
         lo--;
       } else {
@@ -144,14 +150,14 @@ class SpatialIndex {
     return lo;
   }
 
-  /// Binary search: find last entry index where Y < [bottom].
+  /// Binary search: find last sorted index where Y < [bottom].
   int _upperBoundBottom(double bottom) {
     var lo = 0;
-    var hi = _sortedEntries.length;
+    var hi = _length;
 
     while (lo < hi) {
       final mid = (lo + hi) >> 1;
-      if (_sortedEntries[mid].y < bottom) {
+      if (_sortedY[mid] < bottom) {
         lo = mid + 1;
       } else {
         hi = mid;
@@ -160,11 +166,60 @@ class SpatialIndex {
 
     return lo - 1;
   }
-}
 
-class _YEntry {
-  final double y;
-  final int index;
+  /// In-place sort of _sortedIdx by _sortedY values.
+  /// Uses introsort-like approach: quicksort with insertion sort for small ranges.
+  void _sortByY(int left, int right) {
+    if (right - left < 16) {
+      // Insertion sort for small ranges
+      for (var i = left + 1; i <= right; i++) {
+        final keyY = _sortedY[i];
+        final keyIdx = _sortedIdx[i];
+        var j = i - 1;
+        while (j >= left && (_sortedY[j] > keyY || (_sortedY[j] == keyY && _sortedIdx[j] > keyIdx))) {
+          _sortedY[j + 1] = _sortedY[j];
+          _sortedIdx[j + 1] = _sortedIdx[j];
+          j--;
+        }
+        _sortedY[j + 1] = keyY;
+        _sortedIdx[j + 1] = keyIdx;
+      }
+      return;
+    }
 
-  const _YEntry(this.y, this.index);
+    // Quicksort with median-of-three pivot
+    final mid = (left + right) >> 1;
+    // Sort left, mid, right
+    if (_sortedY[left] > _sortedY[mid]) _swap(left, mid);
+    if (_sortedY[left] > _sortedY[right]) _swap(left, right);
+    if (_sortedY[mid] > _sortedY[right]) _swap(mid, right);
+
+    // Pivot is median, place it at right-1
+    _swap(mid, right - 1);
+    final pivotY = _sortedY[right - 1];
+    final pivotIdx = _sortedIdx[right - 1];
+
+    var i = left;
+    var j = right - 1;
+    while (true) {
+      while (_sortedY[++i] < pivotY || (_sortedY[i] == pivotY && _sortedIdx[i] < pivotIdx)) {}
+      while (_sortedY[--j] > pivotY || (_sortedY[j] == pivotY && _sortedIdx[j] > pivotIdx)) {}
+      if (i >= j) break;
+      _swap(i, j);
+    }
+    _swap(i, right - 1);
+
+    _sortByY(left, i - 1);
+    _sortByY(i + 1, right);
+  }
+
+  void _swap(int a, int b) {
+    final tmpY = _sortedY[a];
+    _sortedY[a] = _sortedY[b];
+    _sortedY[b] = tmpY;
+
+    final tmpIdx = _sortedIdx[a];
+    _sortedIdx[a] = _sortedIdx[b];
+    _sortedIdx[b] = tmpIdx;
+  }
 }

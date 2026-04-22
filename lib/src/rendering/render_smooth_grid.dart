@@ -137,8 +137,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
 
     // ── Step 2: Seed the first child ──
     if (firstChild == null) {
-      final rect = _layoutCache.getRect(firstIndex);
-      if (!addInitialChild(index: firstIndex, layoutOffset: rect.top)) {
+      final r = _layoutCache.getRaw(firstIndex);
+      if (!addInitialChild(index: firstIndex, layoutOffset: r.y)) {
         geometry = SliverGeometry(
           scrollExtent: _totalScrollExtent,
           paintExtent: 0,
@@ -153,12 +153,12 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     var currentLeadingIndex = indexOf(firstChild!);
     while (currentLeadingIndex > firstIndex) {
       final targetIndex = currentLeadingIndex - 1;
-      final rect = _layoutCache.getRect(targetIndex);
+      final r = _layoutCache.getRaw(targetIndex);
       final child = insertAndLayoutLeadingChild(
-        BoxConstraints.tightFor(width: rect.width, height: rect.height),
+        BoxConstraints.tightFor(width: r.w, height: r.h),
       );
       if (child == null) break;
-      _applyParentData(child, targetIndex, rect);
+      _applyParentDataRaw(child, targetIndex, r.x, r.y);
       currentLeadingIndex = targetIndex;
     }
 
@@ -182,16 +182,16 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       final nextIndex = indexOf(trailingChild) + 1;
       if (nextIndex > lastIndex || nextIndex >= _itemCount) break;
 
-      final rect = _layoutCache.getRect(nextIndex);
+      final r = _layoutCache.getRaw(nextIndex);
       final child = insertAndLayoutChild(
-        BoxConstraints.tightFor(width: rect.width, height: rect.height),
+        BoxConstraints.tightFor(width: r.w, height: r.h),
         after: trailingChild,
       );
       if (child == null) {
         childManager.setDidUnderflow(true);
         break;
       }
-      _applyParentData(child, nextIndex, rect);
+      _applyParentDataRaw(child, nextIndex, r.x, r.y);
       trailingChild = child;
     }
 
@@ -221,20 +221,20 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   /// Layout a child and apply its pre-computed position from cache.
   void _layoutChildAt(RenderBox child, int index) {
     if (index < 0 || index >= _layoutCache.totalItems) return;
-    final rect = _layoutCache.getRect(index);
+    final r = _layoutCache.getRaw(index);
     child.layout(
-      BoxConstraints.tightFor(width: rect.width, height: rect.height),
+      BoxConstraints.tightFor(width: r.w, height: r.h),
       parentUsesSize: true,
     );
-    _applyParentData(child, index, rect);
+    _applyParentDataRaw(child, index, r.x, r.y);
   }
 
-  /// Set parent data from pre-computed layout rect.
-  void _applyParentData(RenderBox child, int index, Rect rect) {
+  /// Set parent data from raw layout values (zero-allocation).
+  void _applyParentDataRaw(RenderBox child, int index, double x, double y) {
     final data = child.parentData! as SmoothGridParentData;
-    data.layoutOffset = rect.top;
-    data.crossAxisOffset = rect.left;
-    data.column = _getColumnForX(rect.left);
+    data.layoutOffset = y;
+    data.crossAxisOffset = x;
+    data.column = _getColumnForX(x);
   }
 
   /// Count children before [firstIndex] that should be garbage collected.

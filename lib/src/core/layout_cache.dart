@@ -40,6 +40,7 @@ class LayoutCache {
   /// Returns the layout [Rect] for item at [index].
   ///
   /// This is O(1) — direct array access with bit shifts.
+  /// NOTE: Allocates a Dart Rect object. Use [getRaw] in hot paths.
   Rect getRect(int index) {
     assert(index >= 0 && index < _totalItems, 'Index $index out of range [0, $_totalItems)');
     final chunkIdx = index >> _chunkShift;
@@ -50,6 +51,23 @@ class LayoutCache {
       chunk[offset + 1],
       chunk[offset + 2],
       chunk[offset + 3],
+    );
+  }
+
+  /// Zero-allocation layout accessor for hot paths (layout, paint, hit test).
+  ///
+  /// Returns a record instead of allocating a [Rect] object.
+  /// O(1) — direct array access with bit shifts.
+  ({double x, double y, double w, double h}) getRaw(int index) {
+    assert(index >= 0 && index < _totalItems, 'Index $index out of range [0, $_totalItems)');
+    final chunkIdx = index >> _chunkShift;
+    final offset = (index & _chunkMask) * _stride;
+    final chunk = _chunks[chunkIdx];
+    return (
+      x: chunk[offset],
+      y: chunk[offset + 1],
+      w: chunk[offset + 2],
+      h: chunk[offset + 3],
     );
   }
 
@@ -174,10 +192,18 @@ class LayoutCache {
 
   void _recomputeTotalHeight() {
     _totalHeight = 0;
-    for (var i = 0; i < _totalItems; i++) {
-      final bottom = getBottom(i);
-      if (bottom > _totalHeight) {
-        _totalHeight = bottom;
+    if (_totalItems == 0) return;
+    // Only scan items that exist — use chunk-aware iteration
+    // to avoid getBottom() overhead per item.
+    for (var chunkIdx = 0; chunkIdx < _chunks.length; chunkIdx++) {
+      final chunk = _chunks[chunkIdx];
+      final startItem = chunkIdx * chunkSize;
+      final endItem = startItem + chunkSize;
+      final limit = endItem < _totalItems ? endItem : _totalItems;
+      for (var i = startItem; i < limit; i++) {
+        final localOffset = (i & _chunkMask) * _stride;
+        final bottom = chunk[localOffset + 1] + chunk[localOffset + 3];
+        if (bottom > _totalHeight) _totalHeight = bottom;
       }
     }
   }

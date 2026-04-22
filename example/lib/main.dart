@@ -2,8 +2,6 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart'
-    show FrameTiming, SchedulerBinding, TimingsCallback;
 import 'package:lm_smooth/lm_smooth.dart';
 
 void main() {
@@ -55,65 +53,18 @@ class _GridDemoPageState extends State<GridDemoPage> {
   late int _itemCount = widget.itemCount;
   int _columns = 3;
 
-  // FPS tracking via actual frame timings
-  double _currentFps = 0;
-  double _avgFps = 0;
-  int _frameCount = 0;
-  final List<int> _frameDurationsUs = [];
-  late final TimingsCallback _timingsCallback;
-
-  @override
-  void initState() {
-    super.initState();
-    _timingsCallback = _onFrameTimings;
-    SchedulerBinding.instance.addTimingsCallback(_timingsCallback);
-  }
-
-  void _onFrameTimings(List<FrameTiming> timings) {
-    for (final timing in timings) {
-      // Total frame time = build + raster
-      final totalUs = timing.totalSpan.inMicroseconds;
-      _frameDurationsUs.add(totalUs);
-      if (_frameDurationsUs.length > 120) _frameDurationsUs.removeAt(0);
-      _frameCount++;
-    }
-
-    if (_frameDurationsUs.isNotEmpty) {
-      _currentFps = 1000000.0 / _frameDurationsUs.last;
-
-      final n = math.min(60, _frameDurationsUs.length);
-      final totalUs = _frameDurationsUs
-          .skip(math.max(0, _frameDurationsUs.length - n))
-          .fold<int>(0, (s, d) => s + d);
-      _avgFps = 1000000.0 * n / totalUs;
-    }
-
-    if (_frameCount % 10 == 0) {
-      setState(() {});
-    }
-  }
-
   @override
   void dispose() {
-    SchedulerBinding.instance.removeTimingsCallback(_timingsCallback);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final fpsColor = _currentFps >= 55
-        ? Colors.green
-        : _currentFps >= 30
-        ? Colors.orange
-        : Colors.red;
-
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          '${_fmt(_itemCount)} · $_columns col · '
-          '${_currentFps.toStringAsFixed(0)} FPS '
-          '(avg ${_avgFps.toStringAsFixed(0)})',
-          style: TextStyle(fontSize: 13, color: fpsColor),
+          '${_fmt(_itemCount)} · $_columns col',
+          style: const TextStyle(fontSize: 14),
         ),
         actions: [
           // Column controls
@@ -133,8 +84,6 @@ class _GridDemoPageState extends State<GridDemoPage> {
             tooltip: 'Item count',
             onSelected: (count) => setState(() {
               _itemCount = count;
-              _frameCount = 0;
-              _frameDurationsUs.clear();
             }),
             itemBuilder: (_) => [
               for (final n in [100, 500, 1000, 5000, 10000, 100000, 1000000])

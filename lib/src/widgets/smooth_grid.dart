@@ -127,6 +127,7 @@ class _SmoothGridState extends State<SmoothGrid> {
   }
 
   void _ensureLayout(double viewportWidth) {
+    if (viewportWidth <= 0) return; // Guard: no valid viewport yet
     if (!_needsRecompute && viewportWidth == _lastViewportWidth) return;
 
     final del = widget.delegate;
@@ -153,6 +154,11 @@ class _SmoothGridState extends State<SmoothGrid> {
         final viewportWidth = widget.scrollDirection == Axis.vertical
             ? constraints.maxWidth
             : constraints.maxHeight;
+
+        // Skip rendering if viewport has no size yet (first frame)
+        if (viewportWidth <= 0) {
+          return const SizedBox.shrink();
+        }
 
         // Pre-compute layout before building SliverGrid
         _ensureLayout(viewportWidth);
@@ -198,6 +204,6 @@ class _SmoothGridState extends State<SmoothGrid> {
       );
     }
 
-    return KeyedSubtree(key: ValueKey<int>(index), child: child);
+    return child;
   }
 }
