@@ -330,6 +330,35 @@ void main() {
         1,
       );
     });
+
+    test('prefers item under pointer in multi-column grid', () {
+      final engine = SmoothDragEngine(collisionHysteresis: 10);
+      final rects = <int, Rect>{
+        0: const Rect.fromLTWH(0, 0, 100, 100),
+        1: const Rect.fromLTWH(110, 0, 100, 100),
+        2: const Rect.fromLTWH(220, 0, 100, 100),
+        3: const Rect.fromLTWH(0, 110, 100, 100),
+        4: const Rect.fromLTWH(110, 110, 100, 100),
+        5: const Rect.fromLTWH(220, 110, 100, 100),
+      };
+
+      engine.startDrag(
+        index: 0,
+        dragRect: rects[0]!,
+        pointerGlobal: const Offset(150, 150),
+        pointerLocal: const Offset(150, 150),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2, 3, 4, 5],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 300,
+        ),
+        4,
+      );
+    });
   });
 
   group('AutoScroller', () {
@@ -355,6 +384,27 @@ void main() {
       expect(
         autoScroller.computeVelocity(pointerY: 250, viewportHeight: 500),
         0,
+      );
+    });
+
+    test('detects both top and bottom edge zones', () {
+      final controller = ScrollController();
+      final autoScroller = AutoScroller(
+        scrollController: controller,
+        edgeThreshold: 80,
+      );
+
+      expect(
+        autoScroller.isInEdgeZone(pointerY: 10, viewportHeight: 500),
+        isTrue,
+      );
+      expect(
+        autoScroller.isInEdgeZone(pointerY: 490, viewportHeight: 500),
+        isTrue,
+      );
+      expect(
+        autoScroller.isInEdgeZone(pointerY: 250, viewportHeight: 500),
+        isFalse,
       );
     });
   });
@@ -413,6 +463,63 @@ void main() {
       expect(items.indexOf(0), greaterThan(0));
     });
 
+    testWidgets('drop immediately after crossing boundary uses latest preview target',
+        (tester) async {
+      final items = List<int>.generate(5, (i) => i);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              return Scaffold(
+                body: SmoothGrid(
+                  itemCount: items.length,
+                  reorderable: true,
+                  reorderConfig: const SmoothReorderConfig(
+                    longPressDelay: Duration(milliseconds: 220),
+                  ),
+                  delegate: SmoothGridDelegate.count(
+                    crossAxisCount: 1,
+                    mainAxisSpacing: 8,
+                    itemExtentBuilder: (_) => 80,
+                  ),
+                  itemBuilder: (context, index) => SmoothGridTile(
+                    child: Container(
+                      key: ValueKey('immediate_item_${items[index]}'),
+                      alignment: Alignment.center,
+                      color: Colors.green,
+                      child: Text('${items[index]}'),
+                    ),
+                  ),
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      final item = items.removeAt(oldIndex);
+                      items.insert(
+                        newIndex > oldIndex ? newIndex - 1 : newIndex,
+                        item,
+                      );
+                    });
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('immediate_item_0'))),
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await gesture.moveBy(const Offset(0, 150));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(items.first, isNot(0));
+      expect(items.indexOf(0), 1);
+    });
+
     testWidgets('drag near bottom auto-scrolls', (tester) async {
       final controller = ScrollController();
       final items = List<int>.generate(40, (i) => i);
@@ -459,5 +566,60 @@ void main() {
       await gesture.up();
       await tester.pump(const Duration(milliseconds: 300));
     });
+
+    testWidgets('multi-column long press starts drag on the touched item',
+        (tester) async {
+      final items = List<int>.generate(12, (i) => i);
+      int? dragStartIndex;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SmoothGrid(
+              itemCount: items.length,
+              reorderable: true,
+              findChildIndexCallback: (key) {
+                if (key is ValueKey<int>) {
+                  final index = items.indexOf(key.value);
+                  return index < 0 ? null : index;
+                }
+                return null;
+              },
+              reorderConfig: const SmoothReorderConfig(
+                longPressDelay: Duration(milliseconds: 220),
+              ),
+              delegate: SmoothGridDelegate.count(
+                crossAxisCount: 3,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                itemExtentBuilder: (_) => 120,
+              ),
+              itemBuilder: (context, index) => SmoothGridTile(
+                key: ValueKey(items[index]),
+                child: Container(
+                  key: ValueKey('grid_touch_${items[index]}'),
+                  color: Colors.purple,
+                  alignment: Alignment.center,
+                  child: Text('${items[index]}'),
+                ),
+              ),
+              onReorderStart: (index) => dragStartIndex = index,
+              onReorder: (_, _) {},
+            ),
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('grid_touch_4'))),
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(dragStartIndex, 4);
+
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 300));
+    });
+
   });
 }

@@ -110,10 +110,87 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     return Rect.fromLTWH(r.x, r.y, r.w, r.h);
   }
 
+  int getItemIndexAt(Offset contentOffset) {
+    final band = constraints.viewportMainAxisExtent > 0
+        ? constraints.viewportMainAxisExtent
+        : 400.0;
+    final candidates = queryVisibleItems(
+      contentOffset.dy - band,
+      contentOffset.dy + band,
+    );
+    var bestIndex = -1;
+    var bestScore = double.infinity;
+    for (final index in candidates) {
+      final rect = getItemRect(index);
+      if (rect.contains(contentOffset)) {
+        return index;
+      }
+      final center = rect.center;
+      final score =
+          (contentOffset.dy - center.dy).abs() +
+          ((contentOffset.dx - center.dx).abs() * 0.75);
+      if (score < bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+    return bestIndex;
+  }
+
   List<int> queryVisibleItems(double top, double bottom) =>
       _spatialIndex.queryVisibleItems(top, bottom);
 
   Map<int, Offset> get previewOffsets => _previewOffsets;
+
+  Map<int, Offset> buildReorderPreviewOffsets({
+    required int dragIndex,
+    required int targetIndex,
+    required Iterable<int> indices,
+  }) {
+    if (dragIndex < 0 ||
+        targetIndex < 0 ||
+        dragIndex >= _itemCount ||
+        targetIndex >= _itemCount ||
+        dragIndex == targetIndex) {
+      return const {};
+    }
+
+    final visible = indices.toSet();
+    final order = List<int>.generate(_itemCount, (i) => i, growable: false).toList();
+    final moved = order.removeAt(dragIndex);
+    final insertAt = targetIndex > dragIndex ? targetIndex - 1 : targetIndex;
+    order.insert(insertAt.clamp(0, order.length), moved);
+
+    final columnCount = _layoutConfig.crossAxisCount;
+    final columnXs = List<double>.generate(columnCount, _layoutConfig.columnX);
+    final columnHeights = List<double>.filled(columnCount, _layoutConfig.paddingTop);
+    final offsets = <int, Offset>{};
+
+    for (final itemIndex in order) {
+      var shortestCol = 0;
+      var minHeight = columnHeights[0];
+      for (var c = 1; c < columnCount; c++) {
+        if (columnHeights[c] < minHeight) {
+          minHeight = columnHeights[c];
+          shortestCol = c;
+        }
+      }
+
+      final currentRect = getItemRect(itemIndex);
+      final nextTopLeft = Offset(columnXs[shortestCol], columnHeights[shortestCol]);
+      if (itemIndex != dragIndex && visible.contains(itemIndex)) {
+        final delta = nextTopLeft - currentRect.topLeft;
+        if (delta != Offset.zero) {
+          offsets[itemIndex] = delta;
+        }
+      }
+
+      columnHeights[shortestCol] =
+          nextTopLeft.dy + currentRect.height + _layoutConfig.mainAxisSpacing;
+    }
+
+    return offsets;
+  }
 
   void setPreviewState({
     required Map<int, Offset> offsets,

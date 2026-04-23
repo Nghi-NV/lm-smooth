@@ -18,11 +18,11 @@ class SmoothReorderConfig {
     this.liftScale = 1.03,
     this.ghostOpacity = 0.96,
     this.settleDuration = const Duration(milliseconds: 180),
-    this.translateDuration = const Duration(milliseconds: 180),
+    this.translateDuration = const Duration(milliseconds: 90),
     this.edgeScrollZone = 72.0,
     this.maxAutoScrollVelocity = 1100.0,
     this.collisionHysteresis = 10.0,
-    this.translateCurve = Curves.fastOutSlowIn,
+    this.translateCurve = Curves.easeOutCubic,
     this.settleCurve = Curves.fastOutSlowIn,
   });
 
@@ -116,6 +116,7 @@ class SmoothDragEngine {
     final previousTarget = _targetIndex;
     var bestIndex = _targetIndex;
     var bestScore = double.infinity;
+    var hitContainedItem = false;
 
     for (final index in candidateIndices) {
       if (index == _dragIndex) continue;
@@ -125,10 +126,19 @@ class SmoothDragEngine {
         continue;
       }
 
+      final containsPointer = rect.contains(pointer);
       final center = rect.center;
       final dy = (pointer.dy - center.dy).abs();
       final dx = (pointer.dx - center.dx).abs();
-      final score = dy + (dx * 0.35);
+      final score = containsPointer ? (dy + dx * 0.15) : (dy * 0.9) + (dx * 0.75);
+
+      if (containsPointer && !hitContainedItem) {
+        bestScore = double.infinity;
+        hitContainedItem = true;
+      }
+      if (hitContainedItem && !containsPointer) {
+        continue;
+      }
       if (score < bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -145,7 +155,7 @@ class SmoothDragEngine {
       final currentScore =
           (pointer.dy - currentCenter.dy).abs() +
           ((pointer.dx - currentCenter.dx).abs() * 0.35);
-      if ((currentScore - bestScore).abs() < collisionHysteresis) {
+      if ((currentScore - bestScore).abs() <= collisionHysteresis) {
         return _targetIndex;
       }
     }

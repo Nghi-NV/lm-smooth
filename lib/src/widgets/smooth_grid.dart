@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -15,6 +16,7 @@ typedef SmoothReorderEndCallback = void Function(int oldIndex, int newIndex);
 class SmoothGrid extends StatefulWidget {
   final int itemCount;
   final IndexedWidgetBuilder itemBuilder;
+  final ChildIndexGetter? findChildIndexCallback;
   final SmoothGridDelegate delegate;
   final ScrollController? controller;
   final ScrollPhysics? physics;
@@ -37,6 +39,7 @@ class SmoothGrid extends StatefulWidget {
     super.key,
     required this.itemCount,
     required this.itemBuilder,
+    this.findChildIndexCallback,
     required this.delegate,
     this.controller,
     this.physics,
@@ -64,6 +67,12 @@ class SmoothGrid extends StatefulWidget {
 }
 
 class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
+  static const SpringDescription _previewSpring = SpringDescription(
+    mass: 1,
+    stiffness: 520,
+    damping: 36,
+  );
+
   final GlobalKey _scrollViewKey = GlobalKey();
   final GlobalKey _sliverKey = GlobalKey();
 
@@ -86,6 +95,9 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
   Offset _latestGlobal = Offset.zero;
   Widget? _ghostChild;
   bool _dropCommitted = false;
+  int _lastPreviewTarget = -1;
+  int _lastPreviewFirstVisible = -1;
+  int _lastPreviewLastVisible = -1;
 
   ScrollController get _scrollController => widget.controller ?? _ownedController!;
   SmoothReorderConfig get _reorderConfig =>
@@ -128,7 +140,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
+    final scrollView = CustomScrollView(
       key: _scrollViewKey,
       controller: _scrollController,
       physics: widget.physics,
@@ -140,12 +152,61 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
           key: _sliverKey,
           itemCount: widget.itemCount,
           itemBuilder: _buildItem,
+          findChildIndexCallback: widget.findChildIndexCallback,
           gridDelegate: widget.delegate,
           addRepaintBoundaries: widget.addRepaintBoundaries,
           addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
           useIsolate: widget.useIsolate,
         ),
       ],
+    );
+
+    if (!widget.reorderable) {
+      return scrollView;
+    }
+
+    return RawGestureDetector(
+      behavior: HitTestBehavior.translucent,
+      gestures: {
+        if (widget.onTap != null)
+          TapGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+                () => TapGestureRecognizer(debugOwner: this),
+                (instance) {
+                  instance.onTapUp = (details) {
+                    final index = _resolveIndexFromGlobalPosition(
+                      details.globalPosition,
+                    );
+                    if (index >= 0) {
+                      widget.onTap?.call(index);
+                    }
+                  };
+                },
+              ),
+        LongPressGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+              () => LongPressGestureRecognizer(
+                debugOwner: this,
+                duration: _reorderConfig.longPressDelay,
+              ),
+              (instance) {
+                instance.onLongPressStart = (details) {
+                  final index = _resolveIndexFromGlobalPosition(
+                    details.globalPosition,
+                  );
+                  if (index >= 0) {
+                    _startDrag(index, details.globalPosition);
+                  }
+                };
+                instance.onLongPressMoveUpdate = (details) {
+                  _handleDragMove(details.globalPosition);
+                };
+                instance.onLongPressEnd = (_) => _finishDrag();
+                instance.onLongPressCancel = _cancelActiveDrag;
+              },
+            ),
+      },
+      child: scrollView,
     );
   }
 
@@ -157,6 +218,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
         return child;
       }
       return GestureDetector(
+        key: child.key,
         behavior: HitTestBehavior.opaque,
         onTap: widget.onTap != null ? () => widget.onTap!(index) : null,
         onLongPress: widget.onLongPress != null
@@ -166,36 +228,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
       );
     }
 
-    return RawGestureDetector(
-      behavior: HitTestBehavior.opaque,
-      gestures: {
-        TapGestureRecognizer:
-            GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
-              () => TapGestureRecognizer(debugOwner: this),
-              (instance) {
-                instance.onTap = widget.onTap != null
-                    ? () => widget.onTap!(index)
-                    : null;
-              },
-            ),
-        LongPressGestureRecognizer:
-            GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
-              () => LongPressGestureRecognizer(
-                debugOwner: this,
-                duration: _reorderConfig.longPressDelay,
-              ),
-              (instance) {
-                instance.onLongPressStart = (details) =>
-                    _startDrag(index, details.globalPosition);
-                instance.onLongPressMoveUpdate = (details) =>
-                    _handleDragMove(details.globalPosition);
-                instance.onLongPressEnd = (_) => _finishDrag();
-                instance.onLongPressCancel = _cancelActiveDrag;
-              },
-            ),
-      },
-      child: child,
-    );
+    return child;
   }
 
   RenderSmoothGrid? get _renderGrid {
@@ -206,6 +239,19 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
   RenderBox? get _scrollViewBox {
     final object = _scrollViewKey.currentContext?.findRenderObject();
     return object is RenderBox ? object : null;
+  }
+
+  int _resolveIndexFromGlobalPosition(Offset globalPosition) {
+    final renderGrid = _renderGrid;
+    final viewportBox = _scrollViewBox;
+    if (renderGrid == null || viewportBox == null) return -1;
+
+    final viewportOffset = _scrollController.hasClients
+        ? _scrollController.position.pixels
+        : 0.0;
+    final pointerLocal = viewportBox.globalToLocal(globalPosition) +
+        Offset(0, viewportOffset);
+    return renderGrid.getItemIndexAt(pointerLocal);
   }
 
   void _startDrag(int index, Offset globalPosition) {
@@ -261,6 +307,11 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     );
 
     _ensureGhostOverlay();
+    _previewFrom = const {};
+    _previewTo = const {};
+    _lastPreviewTarget = index;
+    _lastPreviewFirstVisible = -1;
+    _lastPreviewLastVisible = -1;
     renderGrid.setPreviewState(offsets: const {}, hiddenIndex: index);
     widget.onReorderStart?.call(index);
     _startAutoScrollTicker();
@@ -290,6 +341,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     if (_dragEngine == null) return;
     _latestGlobal = globalPosition;
     _updateFromPointer(globalPosition);
+    _updateAutoScrollActivity(globalPosition);
   }
 
   void _updateFromPointer(Offset globalPosition) {
@@ -297,11 +349,6 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final renderGrid = _renderGrid;
     final viewportBox = _scrollViewBox;
     if (dragEngine == null || renderGrid == null || viewportBox == null) return;
-
-    _applyEdgeScrollImpulse(
-      pointerGlobal: globalPosition,
-      viewportBox: viewportBox,
-    );
 
     final scrollOffset = _scrollController.position.pixels;
     final localInViewport = viewportBox.globalToLocal(globalPosition);
@@ -348,27 +395,32 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     );
     _ghostEntry?.markNeedsBuild();
 
-    _animatePreviewToTarget();
+    _syncPreviewToTarget();
   }
 
-  void _applyEdgeScrollImpulse({
-    required Offset pointerGlobal,
-    required RenderBox viewportBox,
-  }) {
+  void _updateAutoScrollActivity(Offset globalPosition) {
     final autoScroller = _autoScroller;
-    if (autoScroller == null) return;
+    final viewportBox = _scrollViewBox;
+    final ticker = _autoScrollTicker;
+    if (autoScroller == null || viewportBox == null || ticker == null) return;
 
-    final delta = autoScroller.computeDelta(
-      pointerY: viewportBox.globalToLocal(pointerGlobal).dy,
+    final pointerY = viewportBox.globalToLocal(globalPosition).dy;
+    final isInEdgeZone = autoScroller.isInEdgeZone(
+      pointerY: pointerY,
       viewportHeight: viewportBox.size.height,
-      elapsed: const Duration(milliseconds: 16),
     );
-    if (delta != 0) {
-      autoScroller.applyDelta(delta);
+
+    if (isInEdgeZone) {
+      if (!ticker.isActive) {
+        _lastAutoScrollTick = null;
+        ticker.start();
+      }
+    } else if (ticker.isActive) {
+      ticker.stop();
     }
   }
 
-  void _animatePreviewToTarget() {
+  void _syncPreviewToTarget() {
     final dragEngine = _dragEngine;
     final renderGrid = _renderGrid;
     final viewportBox = _scrollViewBox;
@@ -380,16 +432,52 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
       scrollOffset - band,
       scrollOffset + viewportBox.size.height + band,
     );
+    final firstVisible = indices.isEmpty ? -1 : indices.first;
+    final lastVisible = indices.isEmpty ? -1 : indices.last;
+    final targetUnchanged = dragEngine.targetIndex == _lastPreviewTarget;
+    final viewportUnchanged =
+        firstVisible == _lastPreviewFirstVisible &&
+        lastVisible == _lastPreviewLastVisible;
+    if (targetUnchanged && viewportUnchanged) {
+      return;
+    }
 
-    final nextOffsets = dragEngine.buildPreviewOffsets(
+    final nextOffsets = renderGrid.buildReorderPreviewOffsets(
+      dragIndex: dragEngine.dragIndex,
+      targetIndex: dragEngine.targetIndex,
       indices: indices,
-      getItemRect: renderGrid.getItemRect,
     );
+    if (targetUnchanged &&
+        viewportUnchanged == false &&
+        _offsetMapsEqual(nextOffsets, _previewTo)) {
+      _lastPreviewFirstVisible = firstVisible;
+      _lastPreviewLastVisible = lastVisible;
+      return;
+    }
 
-    _previewFrom = renderGrid.previewOffsets;
+    final currentVisual = _currentPreviewOffsets(renderGrid.previewOffsets);
+    _previewController.stop();
+    _previewFrom = currentVisual;
     _previewTo = nextOffsets;
-    _previewController.duration = _reorderConfig.translateDuration;
-    _previewController.forward(from: 0);
+    _lastPreviewTarget = dragEngine.targetIndex;
+    _lastPreviewFirstVisible = firstVisible;
+    _lastPreviewLastVisible = lastVisible;
+    renderGrid.setPreviewState(
+      offsets: currentVisual,
+      hiddenIndex: dragEngine.dragIndex,
+    );
+    _previewController.value = 0;
+    _previewController.animateWith(
+      SpringSimulation(_previewSpring, 0, 1, 0),
+    );
+  }
+
+  Map<int, Offset> _currentPreviewOffsets(Map<int, Offset> fallback) {
+    if (!_previewController.isAnimating) {
+      return fallback;
+    }
+    final value = _previewController.value.clamp(0.0, 1.0);
+    return _lerpOffsetMaps(_previewFrom, _previewTo, value);
   }
 
   void _applyPreviewAnimation() {
@@ -397,7 +485,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final dragEngine = _dragEngine;
     if (renderGrid == null || dragEngine == null) return;
 
-    final value = _reorderConfig.translateCurve.transform(_previewController.value);
+    final value = _previewController.value.clamp(0.0, 1.0);
     renderGrid.setPreviewState(
       offsets: _lerpOffsetMaps(_previewFrom, _previewTo, value),
       hiddenIndex: dragEngine.dragIndex,
@@ -422,12 +510,19 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     return result;
   }
 
+  bool _offsetMapsEqual(Map<int, Offset> a, Map<int, Offset> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (b[entry.key] != entry.value) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void _startAutoScrollTicker() {
     _autoScrollTicker ??= createTicker(_onAutoScrollTick);
-    _lastAutoScrollTick = null;
-    if (!_autoScrollTicker!.isActive) {
-      _autoScrollTicker!.start();
-    }
   }
 
   void _onAutoScrollTick(Duration elapsed) {
@@ -442,14 +537,25 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _lastAutoScrollTick = elapsed;
     if (last == null) return;
 
+    final pointerY = viewportBox.globalToLocal(_latestGlobal).dy;
+    if (!autoScroller.isInEdgeZone(
+      pointerY: pointerY,
+      viewportHeight: viewportBox.size.height,
+    )) {
+      _autoScrollTicker?.stop();
+      return;
+    }
+
     final delta = autoScroller.computeDelta(
-      pointerY: viewportBox.globalToLocal(_latestGlobal).dy,
+      pointerY: pointerY,
       viewportHeight: viewportBox.size.height,
       elapsed: elapsed - last,
     );
     final applied = autoScroller.applyDelta(delta);
     if (applied != 0) {
       _updateFromPointer(_latestGlobal);
+    } else {
+      _autoScrollTicker?.stop();
     }
   }
 
@@ -511,6 +617,9 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _previewTo = const {};
     _ghostRect = Rect.zero;
     _dropCommitted = false;
+    _lastPreviewTarget = -1;
+    _lastPreviewFirstVisible = -1;
+    _lastPreviewLastVisible = -1;
   }
 }
 
@@ -544,12 +653,14 @@ class _GhostFrame extends StatelessWidget {
 class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
   final SmoothGridDelegate gridDelegate;
   final int itemCount;
+  final ChildIndexGetter? findChildIndexCallback;
   final bool? useIsolate;
 
   _SmoothGridSliver({
     super.key,
     required this.itemCount,
     required IndexedWidgetBuilder itemBuilder,
+    this.findChildIndexCallback,
     required this.gridDelegate,
     required bool addRepaintBoundaries,
     required bool addAutomaticKeepAlives,
@@ -558,6 +669,7 @@ class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
          delegate: SliverChildBuilderDelegate(
            itemBuilder,
            childCount: itemCount,
+           findChildIndexCallback: findChildIndexCallback,
            addRepaintBoundaries: addRepaintBoundaries,
            addAutomaticKeepAlives: addAutomaticKeepAlives,
          ),

@@ -124,6 +124,15 @@ class _GridDemoPageState extends State<GridDemoPage> {
       itemCount: _itemCount,
       reorderable: _reorderable,
       addAutomaticKeepAlives: false,
+      findChildIndexCallback: (key) {
+        if (key is ValueKey<int>) {
+          final itemId = key.value;
+          final currentItems = _reorderable ? _items : List<int>.generate(_itemCount, (i) => i);
+          final index = currentItems.indexOf(itemId);
+          return index < 0 ? null : index;
+        }
+        return null;
+      },
       delegate: SmoothGridDelegate.count(
         crossAxisCount: _columns,
         mainAxisSpacing: 6,
@@ -135,7 +144,10 @@ class _GridDemoPageState extends State<GridDemoPage> {
       ),
       itemBuilder: (context, index) {
         final itemIndex = _reorderable ? _items[index] : index;
-        return SmoothGridTile(child: _ItemCard(index: itemIndex));
+        return SmoothGridTile(
+          key: ValueKey(itemIndex),
+          child: _ItemCard(index: itemIndex),
+        );
       },
       onReorder: _reorderable
           ? (oldIndex, newIndex) {
@@ -156,6 +168,7 @@ class _GridDemoPageState extends State<GridDemoPage> {
       itemCount: _itemCount,
       itemBuilder: (context, index) {
         return Padding(
+          key: ValueKey('list_item_$index'),
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
           child: SizedBox(
             height: _heightForIndex(index),

@@ -14,6 +14,14 @@ class AutoScroller {
     this.velocityCurve = Curves.easeOutCubic,
   });
 
+  bool isInEdgeZone({
+    required double pointerY,
+    required double viewportHeight,
+  }) {
+    if (viewportHeight <= 0) return false;
+    return pointerY < edgeThreshold || pointerY > viewportHeight - edgeThreshold;
+  }
+
   double computeVelocity({
     required double pointerY,
     required double viewportHeight,
