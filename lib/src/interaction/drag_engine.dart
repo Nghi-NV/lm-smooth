@@ -89,14 +89,14 @@ class SmoothDragEngine {
   void updatePointer({
     required Offset pointerGlobal,
     required Offset pointerLocal,
-    double? draggedTop,
+    Offset? draggedTopLeft,
   }) {
     _pointerGlobal = pointerGlobal;
     _pointerLocal = pointerLocal;
-    if (draggedTop != null) {
+    if (draggedTopLeft != null) {
       _dragRect = Rect.fromLTWH(
-        _dragRect.left,
-        draggedTop,
+        draggedTopLeft.dx,
+        draggedTopLeft.dy,
         _dragRect.width,
         _dragRect.height,
       );
@@ -108,15 +108,19 @@ class SmoothDragEngine {
     required Rect Function(int index) getItemRect,
     required double viewportTop,
     required double viewportBottom,
+    required int maxTargetIndex,
   }) {
     if (!isDragging) return -1;
     if (candidateIndices.isEmpty) return _targetIndex;
 
     final pointer = _pointerLocal;
+    final draggedRect = _dragRect;
     final previousTarget = _targetIndex;
     var bestIndex = _targetIndex;
+    Rect? bestRect;
     var bestScore = double.infinity;
     var hitContainedItem = false;
+    var hitOverlappingItem = false;
 
     for (final index in candidateIndices) {
       if (index == _dragIndex) continue;
@@ -127,14 +131,33 @@ class SmoothDragEngine {
       }
 
       final containsPointer = rect.contains(pointer);
+      final overlapsDraggedRect = draggedRect.overlaps(rect);
+      final intersection = overlapsDraggedRect
+          ? draggedRect.intersect(rect)
+          : Rect.zero;
+      final overlapArea = intersection.width > 0 && intersection.height > 0
+          ? intersection.width * intersection.height
+          : 0.0;
       final center = rect.center;
       final dy = (pointer.dy - center.dy).abs();
       final dx = (pointer.dx - center.dx).abs();
-      final score = containsPointer ? (dy + dx * 0.15) : (dy * 0.9) + (dx * 0.75);
+      final score = overlapsDraggedRect
+          ? (dy * 0.45) + (dx * 0.25) - (overlapArea * 0.0015)
+          : containsPointer
+          ? (dy + dx * 0.15)
+          : (dy * 0.9) + (dx * 0.75);
 
-      if (containsPointer && !hitContainedItem) {
+      if (overlapsDraggedRect && !hitOverlappingItem) {
+        bestScore = double.infinity;
+        hitOverlappingItem = true;
+        hitContainedItem = false;
+      }
+      if (containsPointer && !hitContainedItem && !hitOverlappingItem) {
         bestScore = double.infinity;
         hitContainedItem = true;
+      }
+      if (hitOverlappingItem && !overlapsDraggedRect) {
+        continue;
       }
       if (hitContainedItem && !containsPointer) {
         continue;
@@ -142,15 +165,28 @@ class SmoothDragEngine {
       if (score < bestScore) {
         bestScore = score;
         bestIndex = index;
+        bestRect = rect;
       }
     }
 
-    if (bestIndex == _targetIndex) {
+    if (bestRect == null) {
+      return _targetIndex;
+    }
+
+    final candidateTarget = pointer.dy > bestRect.center.dy
+        ? bestIndex + 1
+        : bestIndex;
+    final clampedTarget = candidateTarget.clamp(0, maxTargetIndex);
+
+    if (clampedTarget == _targetIndex) {
       return _targetIndex;
     }
 
     if (previousTarget >= 0 && previousTarget != _dragIndex) {
-      final currentRect = getItemRect(previousTarget);
+      final anchorIndex = previousTarget >= maxTargetIndex
+          ? maxTargetIndex
+          : previousTarget.clamp(0, maxTargetIndex);
+      final currentRect = getItemRect(anchorIndex);
       final currentCenter = currentRect.center;
       final currentScore =
           (pointer.dy - currentCenter.dy).abs() +
@@ -160,7 +196,7 @@ class SmoothDragEngine {
       }
     }
 
-    _targetIndex = bestIndex.clamp(0, candidateIndices.last);
+    _targetIndex = clampedTarget;
     return _targetIndex;
   }
 

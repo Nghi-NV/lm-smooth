@@ -268,6 +268,7 @@ void main() {
       engine.updatePointer(
         pointerGlobal: const Offset(10, 210),
         pointerLocal: const Offset(10, 210),
+        draggedTopLeft: const Offset(0, 200),
       );
 
       final target = engine.computeTargetIndex(
@@ -275,6 +276,7 @@ void main() {
         getItemRect: (index) => rects[index]!,
         viewportTop: 0,
         viewportBottom: 400,
+        maxTargetIndex: 3,
       );
 
       expect(target, 2);
@@ -311,6 +313,7 @@ void main() {
           getItemRect: (index) => rects[index]!,
           viewportTop: 0,
           viewportBottom: 400,
+          maxTargetIndex: 2,
         ),
         1,
       );
@@ -318,6 +321,7 @@ void main() {
       engine.updatePointer(
         pointerGlobal: const Offset(10, 136),
         pointerLocal: const Offset(10, 136),
+        draggedTopLeft: const Offset(0, 126),
       );
 
       expect(
@@ -326,6 +330,7 @@ void main() {
           getItemRect: (index) => rects[index]!,
           viewportTop: 0,
           viewportBottom: 400,
+          maxTargetIndex: 2,
         ),
         1,
       );
@@ -355,8 +360,68 @@ void main() {
           getItemRect: (index) => rects[index]!,
           viewportTop: 0,
           viewportBottom: 300,
+          maxTargetIndex: 5,
         ),
         4,
+      );
+    });
+
+    test('prefers overlap with dragged rect when moving across columns', () {
+      final engine = SmoothDragEngine(collisionHysteresis: 10);
+      final rects = <int, Rect>{
+        0: const Rect.fromLTWH(0, 0, 100, 100),
+        1: const Rect.fromLTWH(110, 0, 100, 100),
+        2: const Rect.fromLTWH(220, 0, 100, 100),
+      };
+
+      engine.startDrag(
+        index: 0,
+        dragRect: rects[0]!,
+        pointerGlobal: const Offset(50, 50),
+        pointerLocal: const Offset(50, 50),
+      );
+      engine.updatePointer(
+        pointerGlobal: const Offset(165, 50),
+        pointerLocal: const Offset(160, 50),
+        draggedTopLeft: const Offset(115, 0),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 120,
+          maxTargetIndex: 2,
+        ),
+        1,
+      );
+    });
+
+    test('uses lower half of hovered item as insert-after slot', () {
+      final engine = SmoothDragEngine(collisionHysteresis: 10);
+      final rects = <int, Rect>{
+        0: const Rect.fromLTWH(0, 0, 100, 80),
+        1: const Rect.fromLTWH(0, 90, 100, 80),
+        2: const Rect.fromLTWH(0, 180, 100, 80),
+      };
+
+      engine.startDrag(
+        index: 0,
+        dragRect: rects[0]!,
+        pointerGlobal: const Offset(10, 155),
+        pointerLocal: const Offset(10, 155),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 300,
+          maxTargetIndex: 2,
+        ),
+        2,
       );
     });
   });
