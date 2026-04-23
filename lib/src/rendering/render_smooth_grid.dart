@@ -42,6 +42,11 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   double _totalScrollExtent = 0;
   bool _needsLayoutRecompute = true;
 
+  // --- Fast scroll path ---
+  int _lastFirstIndex = -1;
+  int _lastLastIndex = -1;
+  bool _layoutJustRecomputed = false;
+
   // --- Auto-Isolate support ---
   bool? _useIsolate;
   bool _isolateInFlight = false;
@@ -117,6 +122,7 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     }
 
     // Recompute full masonry layout if needed
+    _layoutJustRecomputed = false;
     if (_needsLayoutRecompute) {
       if (_shouldUseIsolate && !_isolateInFlight) {
         // Async path: compute on Isolate, show old data while waiting
@@ -135,6 +141,9 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
           config: _layoutConfig,
         );
         _needsLayoutRecompute = false;
+        _layoutJustRecomputed = true;
+        _lastFirstIndex = -1; // Force full child management
+        _lastLastIndex = -1;
       }
     }
 
@@ -165,6 +174,19 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     final firstIndex = math.max(0, range.start);
     final lastIndex = math.min(range.end, _itemCount - 1);
 
+    // ── Fast path: visible range unchanged, no layout recompute ──
+    // During slow scroll, most frames have the same visible items.
+    // Skip ALL child management — just update geometry.
+    if (!_layoutJustRecomputed &&
+        firstIndex == _lastFirstIndex &&
+        lastIndex == _lastLastIndex &&
+        firstChild != null) {
+      _setGeometry(scrollOffset, remainingPaintExtent);
+      return;
+    }
+    _lastFirstIndex = firstIndex;
+    _lastLastIndex = lastIndex;
+
     // ── Step 1: Garbage collect children outside visible range ──
     final leadingGarbage = _countLeadingGarbage(firstIndex);
     final trailingGarbage = _countTrailingGarbage(lastIndex);
@@ -182,6 +204,9 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
         return;
       }
       _layoutChildAt(firstChild!, firstIndex);
+    } else if (_layoutJustRecomputed) {
+      // Config changed — re-layout existing firstChild with new cache data
+      _layoutChildAt(firstChild!, indexOf(firstChild!));
     }
 
     // ── Step 3: Walk backward to firstIndex ──
@@ -197,19 +222,13 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       currentLeadingIndex = targetIndex;
     }
 
-    // ── Step 4: Ensure firstChild is laid out ──
-    {
-      final idx = indexOf(firstChild!);
-      _layoutChildAt(firstChild!, idx);
-    }
-
-    // ── Step 5: Walk forward to lastIndex ──
+    // ── Step 4: Walk forward — only re-layout if config changed ──
     var trailingChild = firstChild!;
-    // Walk to the last existing child and layout each one
     while (childAfter(trailingChild) != null) {
       trailingChild = childAfter(trailingChild)!;
-      final idx = indexOf(trailingChild);
-      _layoutChildAt(trailingChild, idx);
+      if (_layoutJustRecomputed) {
+        _layoutChildAt(trailingChild, indexOf(trailingChild));
+      }
     }
 
     // Create new children going forward
@@ -230,7 +249,12 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       trailingChild = child;
     }
 
-    // ── Step 6: Compute geometry ──
+    // ── Step 5: Compute geometry ──
+    _setGeometry(scrollOffset, remainingPaintExtent);
+  }
+
+  /// Compute and set sliver geometry from scroll state.
+  void _setGeometry(double scrollOffset, double remainingPaintExtent) {
     final paintExtent = math.min(
       remainingPaintExtent,
       math.max(0.0, _totalScrollExtent - scrollOffset),
