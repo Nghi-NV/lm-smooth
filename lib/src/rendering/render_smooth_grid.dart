@@ -70,7 +70,16 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   }
 
   set itemExtentBuilder(SmoothItemExtentBuilder value) {
+    // Store the new builder but DON'T force recompute.
+    // Function closures can't be compared; the setter is called on every
+    // widget rebuild with a new closure even if the underlying data hasn't
+    // changed. Only config/itemCount changes should trigger recompute.
     _itemExtentBuilder = value;
+  }
+
+  /// Explicitly mark layout as dirty when item heights actually change.
+  /// Call this after updating item data that affects heights.
+  void markLayoutDirty() {
     _needsLayoutRecompute = true;
     markNeedsLayout();
   }
