@@ -50,6 +50,7 @@ class _GridDemoPageState extends State<GridDemoPage> {
   late int _itemCount = widget.itemCount;
   int _columns = 3;
   bool _reorderable = false;
+  bool _useList = false; // A/B comparison: Grid vs ListView
 
   // Only used in reorderable mode — lazily initialized
   List<int>? _reorderItems;
@@ -68,21 +69,29 @@ class _GridDemoPageState extends State<GridDemoPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          '${_fmt(_itemCount)} · $_columns col${_reorderable ? ' · Drag' : ''}',
+          '${_fmt(_itemCount)} · ${_useList ? "List" : "$_columns col"}${_reorderable ? ' · Drag' : ''}',
           style: const TextStyle(fontSize: 14),
         ),
         actions: [
-          // Column controls
+          // Grid/List toggle
           IconButton(
-            icon: const Icon(Icons.remove),
-            onPressed: _columns > 1 ? () => setState(() => _columns--) : null,
-            tooltip: 'Less columns',
+            icon: Icon(_useList ? Icons.view_list : Icons.grid_view),
+            onPressed: () => setState(() => _useList = !_useList),
+            tooltip: _useList ? 'Switch to Grid' : 'Switch to List',
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _columns < 6 ? () => setState(() => _columns++) : null,
-            tooltip: 'More columns',
-          ),
+          // Column controls (only for grid mode)
+          if (!_useList) ...[
+            IconButton(
+              icon: const Icon(Icons.remove),
+              onPressed: _columns > 1 ? () => setState(() => _columns--) : null,
+              tooltip: 'Less columns',
+            ),
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: _columns < 6 ? () => setState(() => _columns++) : null,
+              tooltip: 'More columns',
+            ),
+          ],
           // Item count menu
           PopupMenuButton<int>(
             icon: const Icon(Icons.format_list_numbered),
@@ -95,45 +104,7 @@ class _GridDemoPageState extends State<GridDemoPage> {
           ),
         ],
       ),
-      body: SmoothGrid(
-        itemCount: _itemCount,
-        reorderable: _reorderable,
-        addAutomaticKeepAlives: false, // ← critical for 1M items
-        delegate: SmoothGridDelegate.count(
-          crossAxisCount: _columns,
-          mainAxisSpacing: 6,
-          crossAxisSpacing: 6,
-          padding: const EdgeInsets.all(6),
-          itemExtentBuilder: _reorderable
-              ? (index) => _heightForIndex(_items[index])
-              : (index) => _heightForIndex(index), // ← direct, no list lookup
-        ),
-        itemBuilder: (context, index) {
-          final itemIndex = _reorderable ? _items[index] : index;
-          return SmoothGridTile(child: _ItemCard(index: itemIndex));
-        },
-        onReorder: _reorderable
-            ? (oldIndex, newIndex) {
-                setState(() {
-                  final item = _items.removeAt(oldIndex);
-                  final insertAt = newIndex > oldIndex
-                      ? newIndex - 1
-                      : newIndex;
-                  _items.insert(insertAt, item);
-                });
-              }
-            : null,
-        onTap: _reorderable
-            ? null
-            : (index) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Tapped #$index'),
-                    duration: const Duration(milliseconds: 400),
-                  ),
-                );
-              },
-      ),
+      body: _useList ? _buildListView() : _buildSmoothGrid(),
       floatingActionButton: FloatingActionButton.small(
         onPressed: () => setState(() {
           _reorderable = !_reorderable;
@@ -143,6 +114,63 @@ class _GridDemoPageState extends State<GridDemoPage> {
         }),
         tooltip: _reorderable ? 'Disable drag' : 'Enable drag',
         child: Icon(_reorderable ? Icons.lock_open : Icons.drag_indicator),
+      ),
+    );
+  }
+
+  /// SmoothGrid mode
+  Widget _buildSmoothGrid() {
+    return SmoothGrid(
+      itemCount: _itemCount,
+      reorderable: _reorderable,
+      addAutomaticKeepAlives: false,
+      delegate: SmoothGridDelegate.count(
+        crossAxisCount: _columns,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+        padding: const EdgeInsets.all(6),
+        itemExtentBuilder: _reorderable
+            ? (index) => _heightForIndex(_items[index])
+            : (index) => _heightForIndex(index),
+      ),
+      itemBuilder: (context, index) {
+        final itemIndex = _reorderable ? _items[index] : index;
+        return SmoothGridTile(child: _ItemCard(index: itemIndex));
+      },
+      onReorder: _reorderable
+          ? (oldIndex, newIndex) {
+              setState(() {
+                final item = _items.removeAt(oldIndex);
+                final insertAt = newIndex > oldIndex ? newIndex - 1 : newIndex;
+                _items.insert(insertAt, item);
+              });
+            }
+          : null,
+      onTap: _reorderable ? null : (index) => _showSnack(context, index),
+    );
+  }
+
+  /// ListView baseline — same _ItemCard widgets for A/B comparison
+  Widget _buildListView() {
+    return ListView.builder(
+      itemCount: _itemCount,
+      itemBuilder: (context, index) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          child: SizedBox(
+            height: _heightForIndex(index),
+            child: _ItemCard(index: index),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSnack(BuildContext context, int index) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Tapped #$index'),
+        duration: const Duration(milliseconds: 400),
       ),
     );
   }
