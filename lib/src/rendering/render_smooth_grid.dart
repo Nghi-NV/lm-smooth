@@ -51,6 +51,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   bool _isolateInFlight = false;
   List<double>? _cachedItemHeights; // cache heights to avoid re-materialization
   int _cachedItemHeightsCount = 0;
+  Map<int, Offset> _previewOffsets = const {};
+  int _hiddenIndex = -1;
 
   // --- Property setters (trigger relayout) ---
 
@@ -103,6 +105,32 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     return _itemCount > LayoutIsolateManager.kIsolateThreshold;
   }
 
+  Rect getItemRect(int index) {
+    final r = _layoutCache.getRaw(index);
+    return Rect.fromLTWH(r.x, r.y, r.w, r.h);
+  }
+
+  List<int> queryVisibleItems(double top, double bottom) =>
+      _spatialIndex.queryVisibleItems(top, bottom);
+
+  Map<int, Offset> get previewOffsets => _previewOffsets;
+
+  void setPreviewState({
+    required Map<int, Offset> offsets,
+    required int hiddenIndex,
+  }) {
+    _previewOffsets = Map<int, Offset>.unmodifiable(offsets);
+    _hiddenIndex = hiddenIndex;
+    markNeedsPaint();
+  }
+
+  void clearPreviewState() {
+    if (_previewOffsets.isEmpty && _hiddenIndex < 0) return;
+    _previewOffsets = const {};
+    _hiddenIndex = -1;
+    markNeedsPaint();
+  }
+
   @override
   void setupParentData(RenderObject child) {
     if (child.parentData is! SmoothGridParentData) {
@@ -113,6 +141,12 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   @override
   void performLayout() {
     final constraints = this.constraints;
+
+    if (constraints.crossAxisExtent <= 0 ||
+        constraints.viewportMainAxisExtent <= 0) {
+      geometry = SliverGeometry.zero;
+      return;
+    }
 
     // Update viewport width if changed
     if (_layoutConfig.viewportWidth != constraints.crossAxisExtent) {
@@ -364,14 +398,25 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     var child = firstChild;
     while (child != null) {
       final data = child.parentData! as SmoothGridParentData;
+      final index = indexOf(child);
+      if (index == _hiddenIndex) {
+        child = childAfter(child);
+        continue;
+      }
+
       final mainAxisDelta = data.layoutOffset! - constraints.scrollOffset;
+      final preview = _previewOffsets[index] ?? Offset.zero;
 
       // Only paint if within paint region
-      if (mainAxisDelta < constraints.remainingPaintExtent &&
-          mainAxisDelta + child.size.height > 0) {
+      if (mainAxisDelta + preview.dy < constraints.remainingPaintExtent &&
+          mainAxisDelta + preview.dy + child.size.height > 0) {
         context.paintChild(
           child,
-          offset + Offset(data.crossAxisOffset, mainAxisDelta),
+          offset +
+              Offset(
+                data.crossAxisOffset + preview.dx,
+                mainAxisDelta + preview.dy,
+              ),
         );
       }
 
@@ -388,8 +433,16 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     var child = lastChild;
     while (child != null) {
       final data = child.parentData! as SmoothGridParentData;
-      final mainAxisDelta = data.layoutOffset! - constraints.scrollOffset;
-      final childCrossAxis = crossAxisPosition - data.crossAxisOffset;
+      final index = indexOf(child);
+      if (index == _hiddenIndex) {
+        child = childBefore(child);
+        continue;
+      }
+      final preview = _previewOffsets[index] ?? Offset.zero;
+      final mainAxisDelta =
+          data.layoutOffset! - constraints.scrollOffset + preview.dy;
+      final childCrossAxis =
+          crossAxisPosition - data.crossAxisOffset - preview.dx;
 
       if (hitTestBoxChild(
         BoxHitTestResult.wrap(result),
@@ -407,13 +460,15 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   @override
   double childMainAxisPosition(RenderBox child) {
     final data = child.parentData! as SmoothGridParentData;
-    return data.layoutOffset! - constraints.scrollOffset;
+    final preview = _previewOffsets[indexOf(child)] ?? Offset.zero;
+    return data.layoutOffset! - constraints.scrollOffset + preview.dy;
   }
 
   @override
   double childCrossAxisPosition(RenderBox child) {
     final data = child.parentData! as SmoothGridParentData;
-    return data.crossAxisOffset;
+    final preview = _previewOffsets[indexOf(child)] ?? Offset.zero;
+    return data.crossAxisOffset + preview.dx;
   }
 
   /// Notify that items have been reordered (for drag-drop).

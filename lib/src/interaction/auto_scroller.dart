@@ -1,61 +1,66 @@
 import 'package:flutter/widgets.dart';
 
-/// Handles auto-scrolling when dragging near viewport edges.
-///
-/// When the drag position enters the edge zone, smoothly scrolls
-/// the [ScrollController] in that direction.
+/// Handles edge-driven auto-scrolling while dragging.
 class AutoScroller {
   final ScrollController scrollController;
-
-  /// Threshold distance from edge to trigger auto-scroll (in pixels).
   final double edgeThreshold;
-
-  /// Maximum scroll speed (pixels per frame at 60 FPS).
-  final double maxScrollSpeed;
-
-  /// Acceleration curve: speed increases as pointer gets closer to edge.
-  final Curve speedCurve;
+  final double maxScrollVelocity;
+  final Curve velocityCurve;
 
   AutoScroller({
     required this.scrollController,
-    this.edgeThreshold = 80.0,
-    this.maxScrollSpeed = 10.0,
-    this.speedCurve = Curves.easeIn,
+    this.edgeThreshold = 72.0,
+    this.maxScrollVelocity = 1100.0,
+    this.velocityCurve = Curves.easeOutCubic,
   });
 
-  /// Compute scroll delta based on pointer position relative to viewport.
-  ///
-  /// [pointerY] is the pointer's Y position relative to the viewport top.
-  /// [viewportHeight] is the height of the visible viewport.
-  ///
-  /// Returns the scroll delta (positive = scroll down, negative = scroll up).
-  double computeScrollDelta(double pointerY, double viewportHeight) {
+  double computeVelocity({
+    required double pointerY,
+    required double viewportHeight,
+  }) {
+    if (viewportHeight <= 0) return 0;
+
     if (pointerY < edgeThreshold) {
-      // Near top edge — scroll up
       final ratio = 1.0 - (pointerY / edgeThreshold).clamp(0.0, 1.0);
-      return -maxScrollSpeed * speedCurve.transform(ratio);
-    } else if (pointerY > viewportHeight - edgeThreshold) {
-      // Near bottom edge — scroll down
+      return -maxScrollVelocity * velocityCurve.transform(ratio);
+    }
+
+    final bottomStart = viewportHeight - edgeThreshold;
+    if (pointerY > bottomStart) {
       final distanceFromBottom = viewportHeight - pointerY;
-      final ratio = 1.0 - (distanceFromBottom / edgeThreshold).clamp(0.0, 1.0);
-      return maxScrollSpeed * speedCurve.transform(ratio);
+      final ratio =
+          1.0 - (distanceFromBottom / edgeThreshold).clamp(0.0, 1.0);
+      return maxScrollVelocity * velocityCurve.transform(ratio);
     }
 
     return 0;
   }
 
-  /// Apply scroll delta to the controller.
-  void applyScrollDelta(double delta) {
-    if (!scrollController.hasClients || delta == 0) return;
+  double computeDelta({
+    required double pointerY,
+    required double viewportHeight,
+    required Duration elapsed,
+  }) {
+    final velocity = computeVelocity(
+      pointerY: pointerY,
+      viewportHeight: viewportHeight,
+    );
+    if (velocity == 0) return 0;
+    return velocity * (elapsed.inMicroseconds / Duration.microsecondsPerSecond);
+  }
+
+  double applyDelta(double delta) {
+    if (!scrollController.hasClients || delta == 0) return 0;
 
     final position = scrollController.position;
-    final newOffset = (position.pixels + delta).clamp(
+    final next = (position.pixels + delta).clamp(
       position.minScrollExtent,
       position.maxScrollExtent,
     );
-
-    if (newOffset != position.pixels) {
-      scrollController.jumpTo(newOffset);
+    final applied = next - position.pixels;
+    if (applied != 0) {
+      scrollController.jumpTo(next);
     }
+    return applied;
   }
 }

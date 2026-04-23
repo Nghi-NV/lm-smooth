@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lm_smooth/lm_smooth.dart';
 
@@ -245,6 +246,218 @@ void main() {
       recognizer.handlePointerDown(100, 200);
       expect(recognizer.state, GestureState.idle);
       expect(tappedIndex, isNull);
+    });
+  });
+
+  group('SmoothDragEngine', () {
+    test('preview mapping shifts affected items only', () {
+      final engine = SmoothDragEngine(collisionHysteresis: 10);
+      final rects = <int, Rect>{
+        0: const Rect.fromLTWH(0, 0, 100, 80),
+        1: const Rect.fromLTWH(0, 90, 100, 100),
+        2: const Rect.fromLTWH(0, 200, 100, 70),
+        3: const Rect.fromLTWH(0, 280, 100, 60),
+      };
+
+      engine.startDrag(
+        index: 0,
+        dragRect: rects[0]!,
+        pointerGlobal: const Offset(10, 10),
+        pointerLocal: const Offset(10, 10),
+      );
+      engine.updatePointer(
+        pointerGlobal: const Offset(10, 210),
+        pointerLocal: const Offset(10, 210),
+      );
+
+      final target = engine.computeTargetIndex(
+        candidateIndices: const [0, 1, 2, 3],
+        getItemRect: (index) => rects[index]!,
+        viewportTop: 0,
+        viewportBottom: 400,
+      );
+
+      expect(target, 2);
+
+      final preview = engine.buildPreviewOffsets(
+        indices: const [0, 1, 2, 3],
+        getItemRect: (index) => rects[index]!,
+      );
+
+      expect(preview[1], const Offset(0, -90));
+      expect(preview[2], const Offset(0, -110));
+      expect(preview.containsKey(0), isFalse);
+      expect(preview.containsKey(3), isFalse);
+    });
+
+    test('collision hysteresis keeps current target stable', () {
+      final engine = SmoothDragEngine(collisionHysteresis: 20);
+      final rects = <int, Rect>{
+        0: const Rect.fromLTWH(0, 0, 100, 80),
+        1: const Rect.fromLTWH(0, 90, 100, 80),
+        2: const Rect.fromLTWH(0, 180, 100, 80),
+      };
+
+      engine.startDrag(
+        index: 0,
+        dragRect: rects[0]!,
+        pointerGlobal: const Offset(10, 120),
+        pointerLocal: const Offset(10, 120),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 400,
+        ),
+        1,
+      );
+
+      engine.updatePointer(
+        pointerGlobal: const Offset(10, 136),
+        pointerLocal: const Offset(10, 136),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 400,
+        ),
+        1,
+      );
+    });
+  });
+
+  group('AutoScroller', () {
+    test('velocity increases near viewport edge', () {
+      final controller = ScrollController();
+      final autoScroller = AutoScroller(
+        scrollController: controller,
+        edgeThreshold: 80,
+        maxScrollVelocity: 1000,
+      );
+
+      final mid = autoScroller.computeVelocity(
+        pointerY: 40,
+        viewportHeight: 500,
+      );
+      final nearEdge = autoScroller.computeVelocity(
+        pointerY: 5,
+        viewportHeight: 500,
+      );
+
+      expect(mid, lessThan(0));
+      expect(nearEdge.abs(), greaterThan(mid.abs()));
+      expect(
+        autoScroller.computeVelocity(pointerY: 250, viewportHeight: 500),
+        0,
+      );
+    });
+  });
+
+  group('SmoothGrid reorder', () {
+    testWidgets('long press drag reorders with overlay preview', (tester) async {
+      final items = List<int>.generate(8, (i) => i);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              return Scaffold(
+                body: SmoothGrid(
+                  itemCount: items.length,
+                  reorderable: true,
+                  reorderConfig: const SmoothReorderConfig(
+                    longPressDelay: Duration(milliseconds: 220),
+                  ),
+                  delegate: SmoothGridDelegate.count(
+                    crossAxisCount: 1,
+                    mainAxisSpacing: 8,
+                    itemExtentBuilder: (_) => 80,
+                  ),
+                  itemBuilder: (context, index) => SmoothGridTile(
+                    child: Container(
+                      key: ValueKey('item_${items[index]}'),
+                      alignment: Alignment.center,
+                      color: Colors.blue,
+                      child: Text('${items[index]}'),
+                    ),
+                  ),
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      final item = items.removeAt(oldIndex);
+                      items.insert(newIndex > oldIndex ? newIndex - 1 : newIndex, item);
+                    });
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('item_0'))),
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await gesture.moveBy(const Offset(0, 320));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(items.first, isNot(0));
+      expect(items.indexOf(0), greaterThan(0));
+    });
+
+    testWidgets('drag near bottom auto-scrolls', (tester) async {
+      final controller = ScrollController();
+      final items = List<int>.generate(40, (i) => i);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 320,
+            child: SmoothGrid(
+              controller: controller,
+              itemCount: items.length,
+              reorderable: true,
+              reorderConfig: const SmoothReorderConfig(
+                longPressDelay: Duration(milliseconds: 220),
+              ),
+              delegate: SmoothGridDelegate.count(
+                crossAxisCount: 1,
+                mainAxisSpacing: 8,
+                itemExtentBuilder: (_) => 80,
+              ),
+              itemBuilder: (context, index) => SmoothGridTile(
+                child: Container(
+                  key: ValueKey('scroll_item_${items[index]}'),
+                  color: Colors.red,
+                ),
+              ),
+              onReorder: (_, _) {},
+            ),
+          ),
+        ),
+      );
+
+      final start = tester.getCenter(find.byKey(const ValueKey('scroll_item_0')));
+      final gridRect = tester.getRect(find.byType(SmoothGrid));
+      final gesture = await tester.startGesture(start);
+      await tester.pump(const Duration(milliseconds: 250));
+      await gesture.moveTo(Offset(start.dx, gridRect.bottom - 4));
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+
+      expect(controller.offset, greaterThan(0));
+
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 300));
     });
   });
 }

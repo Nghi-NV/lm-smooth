@@ -304,8 +304,8 @@ void main() {
       print(
         'Rapid scroll ($frameCount frames, direction changes):\n'
         '  Total: ${sw.elapsedMilliseconds}ms\n'
-        '  Frame latency — P50: ${p50}μs | P95: ${p95}μs | '
-        'P99: ${p99}μs | Max: ${maxFrame}μs\n'
+        '  Frame latency — P50: $p50μs | P95: $p95μs | '
+        'P99: $p99μs | Max: $maxFrameμs\n'
         '  Children/frame — Avg: ${avgChildren.toStringAsFixed(1)} | '
         'Min: $minChildrenPerFrame | Max: $maxChildrenPerFrame\n'
         '  Budget usage: ${(p99 / 16000 * 100).toStringAsFixed(2)}% of 16ms',
@@ -401,7 +401,7 @@ void main() {
       // ignore: avoid_print
       print(
         'Fling scroll ($frameCount frames @ ${scrollSpeed}px/frame):\n'
-        '  P50: ${p50}μs | P99: ${p99}μs | Max: ${frameTimes.last}μs\n'
+        '  P50: $p50μs | P99: $p99μs | Max: ${frameTimes.last}μs\n'
         '  Budget: ${(p99 / 16000 * 100).toStringAsFixed(2)}% of 16ms',
       );
 
@@ -474,8 +474,8 @@ void main() {
         '(${(querySw.elapsedMicroseconds / 10000).toStringAsFixed(1)}μs/query)\n'
         '  10K hits:    ${hitSw.elapsedMilliseconds}ms '
         '(${(hitSw.elapsedMicroseconds / 10000).toStringAsFixed(1)}μs/hit, '
-        '${hitCount}/10K hits)\n'
-        '  Total:      ${totalMs}ms',
+        '$hitCount/10K hits)\n'
+        '  Total:      $totalMs ms',
       );
 
       expect(totalMs, lessThan(3000));

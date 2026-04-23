@@ -1,81 +1,36 @@
+import 'package:flutter/gestures.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
+import '../interaction/auto_scroller.dart';
+import '../interaction/drag_engine.dart';
 import '../rendering/render_smooth_grid.dart';
 import 'smooth_grid_delegate.dart';
 
+typedef SmoothReorderStartCallback = void Function(int index);
+typedef SmoothReorderUpdateCallback = void Function(int oldIndex, int newIndex);
+typedef SmoothReorderEndCallback = void Function(int oldIndex, int newIndex);
+
 /// A high-performance staggered/masonry grid view.
-///
-/// Renders 1M+ items smoothly by:
-/// - Pre-computing layout positions (no measure pass)
-/// - Only building visible children via [SliverChildBuilderDelegate]
-/// - Using [LayoutCache] with O(1) lookups and [SpatialIndex] with O(log n) queries
-/// - **No LayoutBuilder overhead** — constraints read directly in RenderSliver
-///
-/// For datasets >100K items, layout is automatically computed on a background
-/// Isolate to avoid blocking the main thread. Set [useIsolate] to override.
-///
-/// ## Basic Usage
-/// ```dart
-/// SmoothGrid(
-///   itemCount: items.length,
-///   itemBuilder: (context, index) => SmoothGridTile(
-///     child: YourItemWidget(items[index]),
-///   ),
-///   delegate: SmoothGridDelegate.count(
-///     crossAxisCount: 3,
-///     mainAxisSpacing: 8,
-///     crossAxisSpacing: 8,
-///     itemExtentBuilder: (index) => items[index].height,
-///   ),
-/// )
-/// ```
 class SmoothGrid extends StatefulWidget {
-  /// Total number of items in the grid.
   final int itemCount;
-
-  /// Builder for each item widget.
   final IndexedWidgetBuilder itemBuilder;
-
-  /// Layout delegate configuring columns, spacing, and item heights.
   final SmoothGridDelegate delegate;
-
-  /// Optional scroll controller.
   final ScrollController? controller;
-
-  /// Scroll physics.
   final ScrollPhysics? physics;
-
-  /// Whether items can be reordered via drag and drop.
   final bool reorderable;
-
-  /// Called when an item is tapped.
   final ValueChanged<int>? onTap;
-
-  /// Called when an item is long-pressed.
   final ValueChanged<int>? onLongPress;
-
-  /// Called when items are reordered via drag and drop.
   final void Function(int oldIndex, int newIndex)? onReorder;
-
-  /// Whether to add [RepaintBoundary] to each item.
+  final SmoothReorderConfig? reorderConfig;
+  final SmoothReorderStartCallback? onReorderStart;
+  final SmoothReorderUpdateCallback? onReorderUpdate;
+  final SmoothReorderEndCallback? onReorderEnd;
   final bool addRepaintBoundaries;
-
-  /// Whether to add [AutomaticKeepAlive] to each item.
   final bool addAutomaticKeepAlives;
-
-  /// Cache extent in pixels (overscan/prefetch area).
   final double? cacheExtent;
-
-  /// Scroll direction. Default: vertical.
   final Axis scrollDirection;
-
-  /// Whether the grid has a fixed extent and shrinks to fit.
   final bool shrinkWrap;
-
-  /// Controls Isolate usage for layout computation.
-  /// - `null` (default): auto-detect (use Isolate for >100K items)
-  /// - `true`: always use Isolate
-  /// - `false`: never use Isolate
   final bool? useIsolate;
 
   const SmoothGrid({
@@ -89,6 +44,10 @@ class SmoothGrid extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.onReorder,
+    this.reorderConfig,
+    this.onReorderStart,
+    this.onReorderUpdate,
+    this.onReorderEnd,
     this.addRepaintBoundaries = true,
     this.addAutomaticKeepAlives = false,
     this.cacheExtent,
@@ -104,20 +63,81 @@ class SmoothGrid extends StatefulWidget {
   State<SmoothGrid> createState() => _SmoothGridState();
 }
 
-class _SmoothGridState extends State<SmoothGrid> {
+class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
+  final GlobalKey _scrollViewKey = GlobalKey();
+  final GlobalKey _sliverKey = GlobalKey();
+
+  late final AnimationController _previewController;
+  late final AnimationController _settleController;
+
+  ScrollController? _ownedController;
+  Ticker? _autoScrollTicker;
+  Duration? _lastAutoScrollTick;
+  OverlayEntry? _ghostEntry;
+
+  SmoothDragEngine? _dragEngine;
+  AutoScroller? _autoScroller;
+
+  Map<int, Offset> _previewFrom = const {};
+  Map<int, Offset> _previewTo = const {};
+  Rect _ghostRect = Rect.zero;
+  Rect _settleFromRect = Rect.zero;
+  Rect _settleToRect = Rect.zero;
+  Offset _latestGlobal = Offset.zero;
+  Widget? _ghostChild;
+  bool _dropCommitted = false;
+
+  ScrollController get _scrollController => widget.controller ?? _ownedController!;
+  SmoothReorderConfig get _reorderConfig =>
+      widget.reorderConfig ?? const SmoothReorderConfig();
+
+  @override
+  void initState() {
+    super.initState();
+    _previewController =
+        AnimationController(vsync: this)..addListener(_applyPreviewAnimation);
+    _settleController =
+        AnimationController(vsync: this)..addListener(_updateGhostFromSettle);
+    if (widget.controller == null) {
+      _ownedController = ScrollController();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant SmoothGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _ownedController?.dispose();
+      _ownedController = widget.controller == null ? ScrollController() : null;
+    }
+
+    if (!widget.reorderable && _dragEngine != null) {
+      _cancelActiveDrag();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ghostEntry?.remove();
+    _autoScrollTicker?.dispose();
+    _previewController.dispose();
+    _settleController.dispose();
+    _ownedController?.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    // NO LayoutBuilder! Constraints are read directly by RenderSmoothGrid
-    // in performLayout() via constraints.crossAxisExtent.
-    // This eliminates an extra build frame on resize.
     return CustomScrollView(
-      controller: widget.controller,
+      key: _scrollViewKey,
+      controller: _scrollController,
       physics: widget.physics,
       scrollDirection: widget.scrollDirection,
       shrinkWrap: widget.shrinkWrap,
       cacheExtent: widget.cacheExtent,
       slivers: [
         _SmoothGridSliver(
+          key: _sliverKey,
           itemCount: widget.itemCount,
           itemBuilder: _buildItem,
           gridDelegate: widget.delegate,
@@ -130,12 +150,14 @@ class _SmoothGridState extends State<SmoothGrid> {
   }
 
   Widget _buildItem(BuildContext context, int index) {
-    Widget child = widget.itemBuilder(context, index);
+    final child = widget.itemBuilder(context, index);
 
-    // Wrap with gesture detectors if needed (only when NOT reorderable)
-    if (!widget.reorderable &&
-        (widget.onTap != null || widget.onLongPress != null)) {
-      child = GestureDetector(
+    if (!widget.reorderable) {
+      if (widget.onTap == null && widget.onLongPress == null) {
+        return child;
+      }
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onTap != null ? () => widget.onTap!(index) : null,
         onLongPress: widget.onLongPress != null
             ? () => widget.onLongPress!(index)
@@ -144,72 +166,388 @@ class _SmoothGridState extends State<SmoothGrid> {
       );
     }
 
-    // Wrap with drag-and-drop when reorderable
-    if (widget.reorderable) {
-      child = _buildDraggableItem(context, index, child);
-    }
-
-    return child;
+    return RawGestureDetector(
+      behavior: HitTestBehavior.opaque,
+      gestures: {
+        TapGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              () => TapGestureRecognizer(debugOwner: this),
+              (instance) {
+                instance.onTap = widget.onTap != null
+                    ? () => widget.onTap!(index)
+                    : null;
+              },
+            ),
+        LongPressGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+              () => LongPressGestureRecognizer(
+                debugOwner: this,
+                duration: _reorderConfig.longPressDelay,
+              ),
+              (instance) {
+                instance.onLongPressStart = (details) =>
+                    _startDrag(index, details.globalPosition);
+                instance.onLongPressMoveUpdate = (details) =>
+                    _handleDragMove(details.globalPosition);
+                instance.onLongPressEnd = (_) => _finishDrag();
+                instance.onLongPressCancel = _cancelActiveDrag;
+              },
+            ),
+      },
+      child: child,
+    );
   }
 
-  Widget _buildDraggableItem(BuildContext context, int index, Widget child) {
-    return LongPressDraggable<int>(
-      data: index,
-      delay: const Duration(milliseconds: 300),
-      hapticFeedbackOnStart: true,
-      feedback: SizedBox(
-        width: 120,
-        height: 120,
+  RenderSmoothGrid? get _renderGrid {
+    final object = _sliverKey.currentContext?.findRenderObject();
+    return object is RenderSmoothGrid ? object : null;
+  }
+
+  RenderBox? get _scrollViewBox {
+    final object = _scrollViewKey.currentContext?.findRenderObject();
+    return object is RenderBox ? object : null;
+  }
+
+  void _startDrag(int index, Offset globalPosition) {
+    if (!widget.reorderable || widget.scrollDirection != Axis.vertical) return;
+
+    final renderGrid = _renderGrid;
+    final viewportBox = _scrollViewBox;
+    if (renderGrid == null || viewportBox == null || index >= widget.itemCount) {
+      return;
+    }
+
+    final itemRect = renderGrid.getItemRect(index);
+    final viewportOffset = _scrollController.hasClients
+        ? _scrollController.position.pixels
+        : 0.0;
+    final viewportRect = Rect.fromLTWH(
+      itemRect.left,
+      itemRect.top - viewportOffset,
+      itemRect.width,
+      itemRect.height,
+    );
+    final globalTopLeft = viewportBox.localToGlobal(viewportRect.topLeft);
+    final globalRect = globalTopLeft & viewportRect.size;
+    final pointerLocal = viewportBox.globalToLocal(globalPosition) +
+        Offset(0, viewportOffset);
+
+    _dragEngine = SmoothDragEngine(
+      collisionHysteresis: _reorderConfig.collisionHysteresis,
+    )..startDrag(
+        index: index,
+        dragRect: itemRect,
+        pointerGlobal: globalPosition,
+        pointerLocal: pointerLocal,
+      );
+
+    _autoScroller = AutoScroller(
+      scrollController: _scrollController,
+      edgeThreshold: _reorderConfig.resolveEdgeScrollZone(viewportBox.size.height),
+      maxScrollVelocity: _reorderConfig.maxAutoScrollVelocity,
+    );
+
+    _ghostRect = globalRect;
+    _latestGlobal = globalPosition;
+    _ghostChild = IgnorePointer(
+      child: SizedBox(
+        width: globalRect.width,
+        height: globalRect.height,
         child: Opacity(
-          opacity: 0.85,
-          child: Transform.scale(scale: 1.05, child: child),
+          opacity: _reorderConfig.ghostOpacity,
+          child: widget.itemBuilder(context, index),
         ),
       ),
-      childWhenDragging: Opacity(opacity: 0.3, child: child),
-      child: DragTarget<int>(
-        onWillAcceptWithDetails: (details) => details.data != index,
-        onAcceptWithDetails: (details) {
-          final oldIndex = details.data;
-          widget.onReorder?.call(oldIndex, index);
-        },
-        builder: (context, candidateData, rejectedData) {
-          if (candidateData.isNotEmpty) {
-            return Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFF6750A4), width: 2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: child,
-            );
-          }
-          if (widget.onTap != null) {
-            return GestureDetector(
-              onTap: () => widget.onTap!(index),
-              child: child,
-            );
-          }
-          return child;
-        },
+    );
+
+    _ensureGhostOverlay();
+    renderGrid.setPreviewState(offsets: const {}, hiddenIndex: index);
+    widget.onReorderStart?.call(index);
+    _startAutoScrollTicker();
+  }
+
+  void _ensureGhostOverlay() {
+    _ghostEntry?.remove();
+    final overlay = Overlay.of(context, rootOverlay: true);
+    if (_ghostChild == null) return;
+
+    _ghostEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        left: _ghostRect.left,
+        top: _ghostRect.top,
+        width: _ghostRect.width,
+        height: _ghostRect.height,
+        child: _GhostFrame(
+          scale: _reorderConfig.liftScale,
+          child: _ghostChild!,
+        ),
+      ),
+    );
+    overlay.insert(_ghostEntry!);
+  }
+
+  void _handleDragMove(Offset globalPosition) {
+    if (_dragEngine == null) return;
+    _latestGlobal = globalPosition;
+    _updateFromPointer(globalPosition);
+  }
+
+  void _updateFromPointer(Offset globalPosition) {
+    final dragEngine = _dragEngine;
+    final renderGrid = _renderGrid;
+    final viewportBox = _scrollViewBox;
+    if (dragEngine == null || renderGrid == null || viewportBox == null) return;
+
+    _applyEdgeScrollImpulse(
+      pointerGlobal: globalPosition,
+      viewportBox: viewportBox,
+    );
+
+    final scrollOffset = _scrollController.position.pixels;
+    final localInViewport = viewportBox.globalToLocal(globalPosition);
+    final localInContent = localInViewport + Offset(0, scrollOffset);
+    dragEngine.updatePointer(
+      pointerGlobal: globalPosition,
+      pointerLocal: localInContent,
+    );
+
+    final viewportTop = scrollOffset;
+    final viewportBottom = viewportTop + viewportBox.size.height;
+    final band = viewportBox.size.height * 0.5;
+    final candidates = renderGrid.queryVisibleItems(
+      viewportTop - band,
+      viewportBottom + band,
+    );
+    final previousTarget = dragEngine.targetIndex;
+
+    int targetIndex;
+    if (localInContent.dy <= viewportTop) {
+      targetIndex = 0;
+    } else if (localInContent.dy >= viewportBottom) {
+      targetIndex = widget.itemCount - 1;
+    } else {
+      targetIndex = dragEngine.computeTargetIndex(
+        candidateIndices: candidates.isEmpty
+            ? List<int>.generate(widget.itemCount, (i) => i)
+            : candidates,
+        getItemRect: renderGrid.getItemRect,
+        viewportTop: viewportTop - band,
+        viewportBottom: viewportBottom + band,
+      );
+    }
+
+    if (targetIndex != previousTarget) {
+      widget.onReorderUpdate?.call(dragEngine.dragIndex, targetIndex);
+    }
+
+    final dragRect = dragEngine.dragRect;
+    _ghostRect = Rect.fromCenter(
+      center: globalPosition,
+      width: dragRect.width,
+      height: dragRect.height,
+    );
+    _ghostEntry?.markNeedsBuild();
+
+    _animatePreviewToTarget();
+  }
+
+  void _applyEdgeScrollImpulse({
+    required Offset pointerGlobal,
+    required RenderBox viewportBox,
+  }) {
+    final autoScroller = _autoScroller;
+    if (autoScroller == null) return;
+
+    final delta = autoScroller.computeDelta(
+      pointerY: viewportBox.globalToLocal(pointerGlobal).dy,
+      viewportHeight: viewportBox.size.height,
+      elapsed: const Duration(milliseconds: 16),
+    );
+    if (delta != 0) {
+      autoScroller.applyDelta(delta);
+    }
+  }
+
+  void _animatePreviewToTarget() {
+    final dragEngine = _dragEngine;
+    final renderGrid = _renderGrid;
+    final viewportBox = _scrollViewBox;
+    if (dragEngine == null || renderGrid == null || viewportBox == null) return;
+
+    final scrollOffset = _scrollController.position.pixels;
+    final band = viewportBox.size.height * 0.5;
+    final indices = renderGrid.queryVisibleItems(
+      scrollOffset - band,
+      scrollOffset + viewportBox.size.height + band,
+    );
+
+    final nextOffsets = dragEngine.buildPreviewOffsets(
+      indices: indices,
+      getItemRect: renderGrid.getItemRect,
+    );
+
+    _previewFrom = renderGrid.previewOffsets;
+    _previewTo = nextOffsets;
+    _previewController.duration = _reorderConfig.translateDuration;
+    _previewController.forward(from: 0);
+  }
+
+  void _applyPreviewAnimation() {
+    final renderGrid = _renderGrid;
+    final dragEngine = _dragEngine;
+    if (renderGrid == null || dragEngine == null) return;
+
+    final value = _reorderConfig.translateCurve.transform(_previewController.value);
+    renderGrid.setPreviewState(
+      offsets: _lerpOffsetMaps(_previewFrom, _previewTo, value),
+      hiddenIndex: dragEngine.dragIndex,
+    );
+  }
+
+  Map<int, Offset> _lerpOffsetMaps(
+    Map<int, Offset> from,
+    Map<int, Offset> to,
+    double t,
+  ) {
+    final keys = <int>{...from.keys, ...to.keys};
+    final result = <int, Offset>{};
+    for (final key in keys) {
+      final start = from[key] ?? Offset.zero;
+      final end = to[key] ?? Offset.zero;
+      final value = Offset.lerp(start, end, t) ?? Offset.zero;
+      if (value != Offset.zero) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  void _startAutoScrollTicker() {
+    _autoScrollTicker ??= createTicker(_onAutoScrollTick);
+    _lastAutoScrollTick = null;
+    if (!_autoScrollTicker!.isActive) {
+      _autoScrollTicker!.start();
+    }
+  }
+
+  void _onAutoScrollTick(Duration elapsed) {
+    final autoScroller = _autoScroller;
+    final viewportBox = _scrollViewBox;
+    if (_dragEngine == null || autoScroller == null || viewportBox == null) {
+      _autoScrollTicker?.stop();
+      return;
+    }
+
+    final last = _lastAutoScrollTick;
+    _lastAutoScrollTick = elapsed;
+    if (last == null) return;
+
+    final delta = autoScroller.computeDelta(
+      pointerY: viewportBox.globalToLocal(_latestGlobal).dy,
+      viewportHeight: viewportBox.size.height,
+      elapsed: elapsed - last,
+    );
+    final applied = autoScroller.applyDelta(delta);
+    if (applied != 0) {
+      _updateFromPointer(_latestGlobal);
+    }
+  }
+
+  void _finishDrag() {
+    final dragEngine = _dragEngine;
+    final renderGrid = _renderGrid;
+    final viewportBox = _scrollViewBox;
+    if (dragEngine == null || renderGrid == null || viewportBox == null) {
+      _cancelActiveDrag();
+      return;
+    }
+
+    _previewController.stop();
+    _autoScrollTicker?.stop();
+
+    final targetRect = renderGrid.getItemRect(dragEngine.targetIndex);
+    final scrollOffset = _scrollController.position.pixels;
+    final globalTopLeft = viewportBox.localToGlobal(
+      Offset(targetRect.left, targetRect.top - scrollOffset),
+    );
+    _settleFromRect = _ghostRect;
+    _settleToRect = globalTopLeft & targetRect.size;
+    _settleController.duration = _reorderConfig.settleDuration;
+    _dropCommitted = dragEngine.targetIndex != dragEngine.dragIndex;
+    _settleController.forward(from: 0).whenComplete(_completeDrop);
+  }
+
+  void _updateGhostFromSettle() {
+    final value = _reorderConfig.settleCurve.transform(_settleController.value);
+    _ghostRect = Rect.lerp(_settleFromRect, _settleToRect, value) ?? _settleToRect;
+    _ghostEntry?.markNeedsBuild();
+  }
+
+  void _completeDrop() {
+    final dragEngine = _dragEngine;
+    if (dragEngine == null) return;
+
+    final oldIndex = dragEngine.dragIndex;
+    final newIndex = dragEngine.targetIndex;
+    if (_dropCommitted) {
+      widget.onReorder?.call(oldIndex, newIndex);
+    }
+    widget.onReorderEnd?.call(oldIndex, newIndex);
+    _cancelActiveDrag();
+  }
+
+  void _cancelActiveDrag() {
+    _autoScrollTicker?.stop();
+    _dragEngine?.reset();
+    _dragEngine = null;
+    _autoScroller = null;
+    _previewController.stop();
+    _settleController.stop();
+    _renderGrid?.clearPreviewState();
+    _ghostEntry?.remove();
+    _ghostEntry = null;
+    _ghostChild = null;
+    _previewFrom = const {};
+    _previewTo = const {};
+    _ghostRect = Rect.zero;
+    _dropCommitted = false;
+  }
+}
+
+class _GhostFrame extends StatelessWidget {
+  final Widget child;
+  final double scale;
+
+  const _GhostFrame({required this.child, required this.scale});
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.scale(
+      scale: scale,
+      alignment: Alignment.center,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0x33000000),
+              blurRadius: 20,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: child,
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// _SmoothGridSliver: Direct RenderObjectWidget → RenderSmoothGrid
-// ---------------------------------------------------------------------------
-
-/// A sliver that creates a [RenderSmoothGrid] directly, bypassing
-/// the SliverGrid → SliverGridDelegate indirection.
-///
-/// This avoids LayoutBuilder overhead and gives the RenderObject direct
-/// access to sliver constraints for viewport-width-based layout.
 class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
   final SmoothGridDelegate gridDelegate;
   final int itemCount;
   final bool? useIsolate;
 
   _SmoothGridSliver({
+    super.key,
     required this.itemCount,
     required IndexedWidgetBuilder itemBuilder,
     required this.gridDelegate,
@@ -232,8 +570,6 @@ class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
   @override
   RenderSmoothGrid createRenderObject(BuildContext context) {
     final element = context as SliverMultiBoxAdaptorElement;
-    // viewportWidth=0 initially; RenderSmoothGrid.performLayout() detects
-    // the real width from constraints.crossAxisExtent and triggers recompute.
     final config = gridDelegate.toConfig(0);
     return RenderSmoothGrid(
       childManager: element,
@@ -248,7 +584,6 @@ class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
     BuildContext context,
     covariant RenderSmoothGrid renderObject,
   ) {
-    // viewportWidth=0 here; actual width comes from performLayout constraints
     final config = gridDelegate.toConfig(0);
     renderObject
       ..layoutConfig = config
