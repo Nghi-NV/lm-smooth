@@ -57,14 +57,6 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     if (configChanged || _layoutConfig.viewportWidth != value.viewportWidth) {
       _layoutConfig = value;
       _needsLayoutRecompute = true;
-
-      if (configChanged) {
-        // Config changed structurally — all item positions are invalid.
-        // Must clear cache and remove all children.
-        _layoutCache.clear();
-        _spatialIndex.invalidate();
-      }
-
       markNeedsLayout();
     }
   }
