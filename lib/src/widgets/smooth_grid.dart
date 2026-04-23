@@ -83,7 +83,7 @@ class SmoothGrid extends StatefulWidget {
     this.onLongPress,
     this.onReorder,
     this.addRepaintBoundaries = true,
-    this.addAutomaticKeepAlives = true,
+    this.addAutomaticKeepAlives = false,
     this.cacheExtent,
     this.scrollDirection = Axis.vertical,
     this.shrinkWrap = false,
@@ -114,6 +114,10 @@ class _SmoothGridState extends State<SmoothGrid> {
   double _lastMainAxisSpacing = -1;
   double _lastCrossAxisSpacing = -1;
 
+  // Cached delegates — avoid re-allocation per build
+  SmoothSliverGridDelegate? _gridDelegate;
+  SliverChildBuilderDelegate? _childDelegate;
+
   @override
   void didUpdateWidget(covariant SmoothGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -123,6 +127,8 @@ class _SmoothGridState extends State<SmoothGrid> {
         del.mainAxisSpacing != _lastMainAxisSpacing ||
         del.crossAxisSpacing != _lastCrossAxisSpacing) {
       _needsRecompute = true;
+      _gridDelegate = null; // Invalidate cached delegate
+      _childDelegate = null;
     }
   }
 
@@ -145,6 +151,26 @@ class _SmoothGridState extends State<SmoothGrid> {
     _lastMainAxisSpacing = del.mainAxisSpacing;
     _lastCrossAxisSpacing = del.crossAxisSpacing;
     _needsRecompute = false;
+    _gridDelegate = null; // Invalidate after recompute
+    _childDelegate = null;
+  }
+
+  SmoothSliverGridDelegate _getGridDelegate() {
+    return _gridDelegate ??= SmoothSliverGridDelegate(
+      cache: _cache,
+      spatialIndex: _spatialIndex,
+      totalExtent: _totalExtent,
+      itemCount: widget.itemCount,
+    );
+  }
+
+  SliverChildBuilderDelegate _getChildDelegate() {
+    return _childDelegate ??= SliverChildBuilderDelegate(
+      _buildItem,
+      childCount: widget.itemCount,
+      addRepaintBoundaries: widget.addRepaintBoundaries,
+      addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
+    );
   }
 
   @override
@@ -171,18 +197,8 @@ class _SmoothGridState extends State<SmoothGrid> {
           cacheExtent: widget.cacheExtent,
           slivers: [
             SliverGrid(
-              gridDelegate: SmoothSliverGridDelegate(
-                cache: _cache,
-                spatialIndex: _spatialIndex,
-                totalExtent: _totalExtent,
-                itemCount: widget.itemCount,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                _buildItem,
-                childCount: widget.itemCount,
-                addRepaintBoundaries: widget.addRepaintBoundaries,
-                addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
-              ),
+              gridDelegate: _getGridDelegate(),
+              delegate: _getChildDelegate(),
             ),
           ],
         );
@@ -220,25 +236,15 @@ class _SmoothGridState extends State<SmoothGrid> {
       hapticFeedbackOnStart: true,
       // Ghost feedback shown while dragging
       feedback: SizedBox(
-        width: _cache.totalItems > index
-            ? _cache.getRaw(index).w
-            : 120,
-        height: _cache.totalItems > index
-            ? _cache.getRaw(index).h
-            : 120,
+        width: _cache.totalItems > index ? _cache.getRaw(index).w : 120,
+        height: _cache.totalItems > index ? _cache.getRaw(index).h : 120,
         child: Opacity(
           opacity: 0.85,
-          child: Transform.scale(
-            scale: 1.05,
-            child: child,
-          ),
+          child: Transform.scale(scale: 1.05, child: child),
         ),
       ),
       // Dim the original item while dragging
-      childWhenDragging: Opacity(
-        opacity: 0.3,
-        child: child,
-      ),
+      childWhenDragging: Opacity(opacity: 0.3, child: child),
       child: DragTarget<int>(
         onWillAcceptWithDetails: (details) => details.data != index,
         onAcceptWithDetails: (details) {
@@ -250,10 +256,7 @@ class _SmoothGridState extends State<SmoothGrid> {
           if (candidateData.isNotEmpty) {
             return Container(
               decoration: BoxDecoration(
-                border: Border.all(
-                  color: const Color(0xFF6750A4),
-                  width: 2,
-                ),
+                border: Border.all(color: const Color(0xFF6750A4), width: 2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: child,
@@ -272,4 +275,3 @@ class _SmoothGridState extends State<SmoothGrid> {
     );
   }
 }
-

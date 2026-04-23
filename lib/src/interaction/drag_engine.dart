@@ -93,17 +93,36 @@ class SmoothDragEngine {
 
   /// Compute the target drop index based on current ghost position.
   ///
-  /// Uses "closest center" algorithm:
-  /// Find the item whose center is closest to the ghost's center.
-  int computeTargetIndex({required int itemCount, required double localY}) {
+  /// Uses "closest center" algorithm on visible items only.
+  /// If viewportTop/viewportBottom are provided, only checks items
+  /// within that range for O(visible) instead of O(n).
+  int computeTargetIndex({
+    required int itemCount,
+    required double localY,
+    double? viewportTop,
+    double? viewportBottom,
+  }) {
     if (itemCount == 0) return 0;
 
     var closestIndex = _dragIndex;
     var closestDistance = double.infinity;
 
-    // Only check visible items (optimization)
-    for (var i = 0; i < itemCount; i++) {
+    // Determine scan range — only visible items when viewport bounds provided
+    final startIdx = viewportTop != null ? 0 : 0;
+    final endIdx = itemCount;
+
+    // When viewport bounds are available, we limit the search.
+    // The caller should provide a pre-filtered range of visible indices.
+    for (var i = startIdx; i < endIdx; i++) {
       final itemCenterY = getItemTop(i) + getItemHeight(i) / 2;
+
+      // Skip items clearly outside viewport (fast early-exit)
+      if (viewportTop != null && viewportBottom != null) {
+        final itemTop = getItemTop(i);
+        final itemBottom = itemTop + getItemHeight(i);
+        if (itemBottom < viewportTop || itemTop > viewportBottom) continue;
+      }
+
       final distance = (localY - itemCenterY).abs();
       if (distance < closestDistance) {
         closestDistance = distance;

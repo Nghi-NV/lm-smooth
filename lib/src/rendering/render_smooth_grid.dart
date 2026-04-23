@@ -80,15 +80,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
 
     // Update viewport width if changed
     if (_layoutConfig.viewportWidth != constraints.crossAxisExtent) {
-      _layoutConfig = MasonryLayoutConfig(
-        crossAxisCount: _layoutConfig.crossAxisCount,
-        mainAxisSpacing: _layoutConfig.mainAxisSpacing,
-        crossAxisSpacing: _layoutConfig.crossAxisSpacing,
+      _layoutConfig = _layoutConfig.copyWith(
         viewportWidth: constraints.crossAxisExtent,
-        paddingLeft: _layoutConfig.paddingLeft,
-        paddingRight: _layoutConfig.paddingRight,
-        paddingTop: _layoutConfig.paddingTop,
-        paddingBottom: _layoutConfig.paddingBottom,
       );
       _needsLayoutRecompute = true;
     }

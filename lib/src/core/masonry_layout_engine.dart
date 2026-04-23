@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'layout_cache.dart';
 import 'spatial_index.dart';
 
@@ -51,6 +53,29 @@ class MasonryLayoutConfig {
   double columnX(int column) {
     return paddingLeft + column * (columnWidth + crossAxisSpacing);
   }
+
+  /// Create a copy with some fields replaced.
+  MasonryLayoutConfig copyWith({
+    int? crossAxisCount,
+    double? mainAxisSpacing,
+    double? crossAxisSpacing,
+    double? viewportWidth,
+    double? paddingLeft,
+    double? paddingRight,
+    double? paddingTop,
+    double? paddingBottom,
+  }) {
+    return MasonryLayoutConfig(
+      crossAxisCount: crossAxisCount ?? this.crossAxisCount,
+      mainAxisSpacing: mainAxisSpacing ?? this.mainAxisSpacing,
+      crossAxisSpacing: crossAxisSpacing ?? this.crossAxisSpacing,
+      viewportWidth: viewportWidth ?? this.viewportWidth,
+      paddingLeft: paddingLeft ?? this.paddingLeft,
+      paddingRight: paddingRight ?? this.paddingRight,
+      paddingTop: paddingTop ?? this.paddingTop,
+      paddingBottom: paddingBottom ?? this.paddingBottom,
+    );
+  }
 }
 
 /// Masonry layout engine using the "Shortest Column First" algorithm.
@@ -67,12 +92,7 @@ class MasonryLayoutEngine {
 
   MasonryLayoutEngine({LayoutCache? cache, SpatialIndex? spatialIndex})
     : cache = cache ?? LayoutCache(),
-      spatialIndex = spatialIndex ?? SpatialIndex(cache ?? LayoutCache()) {
-    // Ensure spatial index points to the same cache
-    if (spatialIndex == null && cache != null) {
-      this.spatialIndex.invalidate();
-    }
-  }
+      spatialIndex = spatialIndex ?? SpatialIndex(cache ?? LayoutCache());
 
   /// Compute the full layout for [itemCount] items.
   ///
@@ -92,6 +112,12 @@ class MasonryLayoutEngine {
     final columnWidth = config.columnWidth;
     final mainAxisSpacing = config.mainAxisSpacing;
 
+    // Pre-compute column X positions — avoid recomputing per item
+    final columnXs = List<double>.generate(
+      columnCount,
+      (c) => config.columnX(c),
+    );
+
     // Track the current height of each column
     final columnHeights = List<double>.filled(columnCount, config.paddingTop);
 
@@ -106,7 +132,7 @@ class MasonryLayoutEngine {
         }
       }
 
-      final x = config.columnX(shortestCol);
+      final x = columnXs[shortestCol];
       final y = columnHeights[shortestCol];
       final h = itemExtentBuilder(i);
 
@@ -159,14 +185,20 @@ class MasonryLayoutEngine {
     final columnWidth = config.columnWidth;
     final mainAxisSpacing = config.mainAxisSpacing;
 
+    // Pre-compute column X positions
+    final columnXs = List<double>.generate(
+      columnCount,
+      (c) => config.columnX(c),
+    );
+
     // Reconstruct column heights from existing layout (before startIndex)
     final columnHeights = List<double>.filled(columnCount, config.paddingTop);
 
-    // Scan existing items to find column heights
+    // Scan existing items to find column heights — zero-allocation
     for (var i = 0; i < startIndex; i++) {
-      final rect = cache.getRect(i);
-      final colIdx = _getColumnForX(rect.left, config);
-      final bottom = rect.bottom + mainAxisSpacing;
+      final r = cache.getRaw(i);
+      final colIdx = _getColumnForX(r.x, config);
+      final bottom = r.y + r.h + mainAxisSpacing;
       if (bottom > columnHeights[colIdx]) {
         columnHeights[colIdx] = bottom;
       }
@@ -183,7 +215,7 @@ class MasonryLayoutEngine {
         }
       }
 
-      final x = config.columnX(shortestCol);
+      final x = columnXs[shortestCol];
       final y = columnHeights[shortestCol];
       final h = itemExtentBuilder(i);
 
@@ -251,7 +283,7 @@ class IsolateLayoutParams {
 ///
 /// Returns a flat [Float64List] where every 4 values = (x, y, w, h).
 /// Transfer via [TransferableTypedData] for zero-copy.
-List<double> computeLayoutIsolate(IsolateLayoutParams params) {
+Float64List computeLayoutIsolate(IsolateLayoutParams params) {
   final columnCount = params.crossAxisCount;
   final contentWidth =
       params.viewportWidth - params.paddingLeft - params.paddingRight;
@@ -264,7 +296,7 @@ List<double> computeLayoutIsolate(IsolateLayoutParams params) {
   }
 
   final columnHeights = List<double>.filled(columnCount, params.paddingTop);
-  final result = List<double>.filled(params.itemCount * 4, 0);
+  final result = Float64List(params.itemCount * 4);
 
   for (var i = 0; i < params.itemCount; i++) {
     // Find shortest column

@@ -135,9 +135,8 @@ class LayoutIsolateManager {
     // Run layout computation on Isolate
     final flatResult = await Isolate.run(() => computeLayoutIsolate(params));
 
-    // Transfer results into cache
-    final float64Result = Float64List.fromList(flatResult);
-    cache.setFromFlatList(float64Result, itemCount);
+    // Transfer results into cache — already Float64List, no conversion needed
+    cache.setFromFlatList(flatResult, itemCount);
 
     // Rebuild spatial index on main thread (needs cache reference)
     spatialIndex.invalidate();

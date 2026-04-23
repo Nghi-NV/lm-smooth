@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/rendering.dart';
 
 import '../core/layout_cache.dart';
@@ -26,6 +24,7 @@ class SmoothSliverGridDelegate extends SliverGridDelegate {
   SliverGridLayout getLayout(SliverConstraints constraints) {
     return _SmoothGridLayout(
       cache: cache,
+      spatialIndex: spatialIndex,
       totalExtent: totalExtent,
       itemCount: itemCount,
     );
@@ -41,17 +40,18 @@ class SmoothSliverGridDelegate extends SliverGridDelegate {
 
 /// Custom [SliverGridLayout] that reads item geometry from pre-computed cache.
 ///
-/// Key insight for masonry layout:
-/// Items are placed using "shortest column first". After placing i items,
-/// the minimum column height is monotonically non-decreasing.
-/// This means we can use binary search on the cache to find viewport bounds.
+/// Uses [SpatialIndex.queryRange] (O(log n)) for viewport queries.
+/// This correctly handles masonry grids where items are NOT monotonically
+/// sorted by Y offset across indices.
 class _SmoothGridLayout extends SliverGridLayout {
   final LayoutCache cache;
+  final SpatialIndex spatialIndex;
   final double totalExtent;
   final int itemCount;
 
   const _SmoothGridLayout({
     required this.cache,
+    required this.spatialIndex,
     required this.totalExtent,
     required this.itemCount,
   });
@@ -66,37 +66,10 @@ class _SmoothGridLayout extends SliverGridLayout {
     if (itemCount == 0) return 0;
     if (scrollOffset <= 0) return 0;
 
-    // Binary search: find the first item whose bottom > scrollOffset
-    // (i.e., it's still visible). Since items are NOT monotonically sorted
-    // by Y (masonry interleaves columns), we use a conservative approach:
-    //
-    // We binary search for an approximate starting point, then back up
-    // to ensure we don't miss items in other columns.
-    var lo = 0;
-    var hi = itemCount - 1;
-
-    while (lo < hi) {
-      final mid = (lo + hi) >> 1;
-      final bottom = cache.getBottom(mid);
-      if (bottom <= scrollOffset) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
-      }
-    }
-
-    // Now lo is approximately correct, but in a masonry grid items in
-    // different columns can have different Y offsets at the same index range.
-    // Back up by (crossAxisCount * 2) items to be safe.
-    // We don't know crossAxisCount here, so back up by a fixed buffer.
-    lo = math.max(0, lo - 20);
-
-    // Linear scan forward to find the true first visible item
-    while (lo < itemCount && cache.getBottom(lo) <= scrollOffset) {
-      lo++;
-    }
-
-    return lo;
+    // Use SpatialIndex: correct O(log n) query on Y-sorted data.
+    // Query a viewport-height window to find the min item index visible.
+    final result = spatialIndex.findFirstVisibleIndex(scrollOffset);
+    return result >= 0 ? result : 0;
   }
 
   @override
@@ -104,30 +77,9 @@ class _SmoothGridLayout extends SliverGridLayout {
     if (itemCount == 0) return 0;
     if (scrollOffset >= totalExtent) return itemCount - 1;
 
-    // Binary search: find the last item whose top < scrollOffset
-    var lo = 0;
-    var hi = itemCount - 1;
-
-    while (lo < hi) {
-      final mid = (lo + hi + 1) >> 1;
-      final top = cache.getY(mid);
-      if (top < scrollOffset) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-
-    // Forward buffer for items in other columns that might start
-    // just before scrollOffset
-    lo = math.min(itemCount - 1, lo + 20);
-
-    // Linear scan backward to find the true last item starting before scrollOffset
-    while (lo > 0 && cache.getY(lo) >= scrollOffset) {
-      lo--;
-    }
-
-    return lo;
+    // Find the last item whose top < scrollOffset.
+    final result = spatialIndex.findLastItemBeforeOffset(scrollOffset);
+    return result >= 0 ? result : 0;
   }
 
   @override
@@ -141,12 +93,13 @@ class _SmoothGridLayout extends SliverGridLayout {
       );
     }
 
-    final rect = cache.getRect(index);
+    // Use getRaw() to avoid Rect allocation — this is called per-child per-frame
+    final r = cache.getRaw(index);
     return SliverGridGeometry(
-      scrollOffset: rect.top,
-      crossAxisOffset: rect.left,
-      mainAxisExtent: rect.height,
-      crossAxisExtent: rect.width,
+      scrollOffset: r.y,
+      crossAxisOffset: r.x,
+      mainAxisExtent: r.h,
+      crossAxisExtent: r.w,
     );
   }
 }

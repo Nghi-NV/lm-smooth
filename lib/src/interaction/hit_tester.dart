@@ -25,15 +25,15 @@ class HitTester {
     final range = _spatialIndex.queryRange(contentY - 1, contentY + 1);
     if (range.start < 0) return -1;
 
-    // Check each candidate item's full rect
+    // Check each candidate item's full rect — zero-allocation
     for (var i = range.start; i <= range.end; i++) {
       if (i >= _cache.totalItems) break;
 
-      final rect = _cache.getRect(i);
-      if (x >= rect.left &&
-          x <= rect.right &&
-          contentY >= rect.top &&
-          contentY <= rect.bottom) {
+      final r = _cache.getRaw(i);
+      if (x >= r.x &&
+          x <= r.x + r.w &&
+          contentY >= r.y &&
+          contentY <= r.y + r.h) {
         return i;
       }
     }

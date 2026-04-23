@@ -25,10 +25,12 @@ class LayoutCache {
   /// Creates a [LayoutCache] with the given [chunkSize].
   /// [chunkSize] must be a power of 2.
   LayoutCache({this.chunkSize = kDefaultChunkSize})
-      : _chunkShift = _log2(chunkSize),
-        _chunkMask = chunkSize - 1 {
-    assert(chunkSize > 0 && (chunkSize & (chunkSize - 1)) == 0,
-        'chunkSize must be a power of 2');
+    : _chunkShift = _log2(chunkSize),
+      _chunkMask = chunkSize - 1 {
+    assert(
+      chunkSize > 0 && (chunkSize & (chunkSize - 1)) == 0,
+      'chunkSize must be a power of 2',
+    );
   }
 
   /// Total number of items stored.
@@ -42,7 +44,10 @@ class LayoutCache {
   /// This is O(1) — direct array access with bit shifts.
   /// NOTE: Allocates a Dart Rect object. Use [getRaw] in hot paths.
   Rect getRect(int index) {
-    assert(index >= 0 && index < _totalItems, 'Index $index out of range [0, $_totalItems)');
+    assert(
+      index >= 0 && index < _totalItems,
+      'Index $index out of range [0, $_totalItems)',
+    );
     final chunkIdx = index >> _chunkShift;
     final offset = (index & _chunkMask) * _stride;
     final chunk = _chunks[chunkIdx];
@@ -59,7 +64,10 @@ class LayoutCache {
   /// Returns a record instead of allocating a [Rect] object.
   /// O(1) — direct array access with bit shifts.
   ({double x, double y, double w, double h}) getRaw(int index) {
-    assert(index >= 0 && index < _totalItems, 'Index $index out of range [0, $_totalItems)');
+    assert(
+      index >= 0 && index < _totalItems,
+      'Index $index out of range [0, $_totalItems)',
+    );
     final chunkIdx = index >> _chunkShift;
     final offset = (index & _chunkMask) * _stride;
     final chunk = _chunks[chunkIdx];
@@ -124,11 +132,9 @@ class LayoutCache {
       final count = remaining < itemsPerChunk ? remaining : itemsPerChunk;
       final chunk = Float64List(itemsPerChunk * _stride);
 
-      // Copy data into chunk
+      // Use setRange for bulk copy — faster than element-by-element loop
       final copyLen = count * _stride;
-      for (var i = 0; i < copyLen; i++) {
-        chunk[i] = data[srcOffset + i];
-      }
+      chunk.setRange(0, copyLen, data, srcOffset);
 
       _chunks.add(chunk);
       srcOffset += copyLen;
@@ -152,9 +158,8 @@ class LayoutCache {
           : chunkSize;
       final copyLen = itemsInChunk * _stride;
 
-      for (var i = 0; i < copyLen; i++) {
-        result[dstOffset + i] = chunk[i];
-      }
+      // Use setRange for bulk copy
+      result.setRange(dstOffset, dstOffset + copyLen, chunk);
       dstOffset += copyLen;
     }
 
@@ -193,18 +198,20 @@ class LayoutCache {
   void _recomputeTotalHeight() {
     _totalHeight = 0;
     if (_totalItems == 0) return;
-    // Only scan items that exist — use chunk-aware iteration
-    // to avoid getBottom() overhead per item.
-    for (var chunkIdx = 0; chunkIdx < _chunks.length; chunkIdx++) {
-      final chunk = _chunks[chunkIdx];
-      final startItem = chunkIdx * chunkSize;
-      final endItem = startItem + chunkSize;
-      final limit = endItem < _totalItems ? endItem : _totalItems;
-      for (var i = startItem; i < limit; i++) {
-        final localOffset = (i & _chunkMask) * _stride;
-        final bottom = chunk[localOffset + 1] + chunk[localOffset + 3];
-        if (bottom > _totalHeight) _totalHeight = bottom;
-      }
+
+    // Scan backwards from the last item — the tallest column's last item
+    // is always near the end. For a C-column masonry grid, the max bottom
+    // must be within the last C items (one per column tail).
+    // Scan last chunk only as an optimization.
+    final lastChunkIdx = (_totalItems - 1) >> _chunkShift;
+    final chunk = _chunks[lastChunkIdx];
+    final startItem = lastChunkIdx * chunkSize;
+    final endItem = _totalItems;
+
+    for (var i = startItem; i < endItem; i++) {
+      final localOffset = (i & _chunkMask) * _stride;
+      final bottom = chunk[localOffset + 1] + chunk[localOffset + 3];
+      if (bottom > _totalHeight) _totalHeight = bottom;
     }
   }
 

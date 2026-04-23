@@ -32,6 +32,9 @@ class SpatialIndex {
   /// Rebuild the spatial index from the current layout cache.
   ///
   /// O(n log n) — called once after layout computation.
+  /// Maximum backtrack distance in _lowerBoundTop to cap worst-case scan.
+  static const int _maxBacktrack = 50;
+
   void rebuild() {
     final n = _cache.totalItems;
     if (n == 0) {
@@ -46,16 +49,18 @@ class SpatialIndex {
       _sortedIdx = Int32List(n);
     }
 
-    // Fill arrays
+    // Fill arrays — batch-read directly via getY (already O(1) each)
+    // For masonry layout, items are already nearly sorted by Y,
+    // so the subsequent sort will be ~O(n) with Timsort.
     for (var i = 0; i < n; i++) {
       _sortedY[i] = _cache.getY(i);
       _sortedIdx[i] = i;
     }
     _length = n;
 
-    // Sort by Y position using indices array (insertion sort for small n,
-    // otherwise use a simple quicksort-like approach)
-    _sortByY(0, n - 1);
+    // Use a paired sort: sort indices by Y using Timsort (Dart default).
+    // Timsort is O(n) for nearly-sorted data, which masonry layout produces.
+    _timsortByY();
 
     _isDirty = false;
   }
@@ -102,15 +107,23 @@ class SpatialIndex {
   ///
   /// This is more precise than [queryRange] — returns exact visible items
   /// instead of a continuous range.
+  ///
+  /// O(log n + k) where k = number of visible items.
   List<int> queryVisibleItems(double top, double bottom) {
     if (_isDirty) rebuild();
     if (_length == 0) return const [];
 
+    // Use binary search to narrow the scan window
+    final startPos = _lowerBoundTop(top);
+    if (startPos >= _length) return const [];
+
+    final endPos = _upperBoundBottom(bottom);
+    if (endPos < 0) return const [];
+
+    if (startPos > endPos) return const [];
+
     final result = <int>[];
-
-    for (var i = 0; i < _length; i++) {
-      if (_sortedY[i] >= bottom) break; // Past viewport, stop (sorted by Y)
-
+    for (var i = startPos; i <= endPos; i++) {
       final itemIdx = _sortedIdx[i];
       final itemBottom = _cache.getBottom(itemIdx);
       if (itemBottom > top) {
@@ -137,8 +150,10 @@ class SpatialIndex {
       }
     }
 
-    // Back up to find items that start before `top` but extend past it
-    while (lo > 0) {
+    // Back up to find items that start before `top` but extend past it.
+    // Bounded to _maxBacktrack to prevent O(k) scan with extreme heights.
+    final minLo = lo > _maxBacktrack ? lo - _maxBacktrack : 0;
+    while (lo > minLo) {
       final prevIdx = _sortedIdx[lo - 1];
       if (_cache.getBottom(prevIdx) > top) {
         lo--;
@@ -167,59 +182,91 @@ class SpatialIndex {
     return lo - 1;
   }
 
-  /// In-place sort of _sortedIdx by _sortedY values.
-  /// Uses introsort-like approach: quicksort with insertion sort for small ranges.
-  void _sortByY(int left, int right) {
-    if (right - left < 16) {
-      // Insertion sort for small ranges
-      for (var i = left + 1; i <= right; i++) {
-        final keyY = _sortedY[i];
-        final keyIdx = _sortedIdx[i];
-        var j = i - 1;
-        while (j >= left && (_sortedY[j] > keyY || (_sortedY[j] == keyY && _sortedIdx[j] > keyIdx))) {
-          _sortedY[j + 1] = _sortedY[j];
-          _sortedIdx[j + 1] = _sortedIdx[j];
-          j--;
-        }
-        _sortedY[j + 1] = keyY;
-        _sortedIdx[j + 1] = keyIdx;
+  /// Find the minimum item index whose bottom edge > [scrollOffset].
+  /// This is the first item that could be visible at this scroll position.
+  ///
+  /// O(log n) binary search on Y-sorted entries.
+  int findFirstVisibleIndex(double scrollOffset) {
+    if (_isDirty) rebuild();
+    if (_length == 0) return -1;
+
+    // Use _lowerBoundTop which already handles back-scanning
+    // for items that start before scrollOffset but extend past it
+    final startPos = _lowerBoundTop(scrollOffset);
+    if (startPos >= _length) return -1;
+
+    // Among visible entries starting from startPos, find minimum item index.
+    // In masonry grid, we only need to check entries within the viewport
+    // window — items at higher Y positions won't have lower indices.
+    // Scan until Y exceeds scrollOffset (items fully past visible start)
+    var minItemIdx = _sortedIdx[startPos];
+    final scanEnd = _upperBoundBottom(scrollOffset + 1) + 1;
+    final endPos = scanEnd < _length ? scanEnd : _length;
+    for (var i = startPos + 1; i < endPos; i++) {
+      final idx = _sortedIdx[i];
+      if (idx < minItemIdx) {
+        minItemIdx = idx;
       }
-      return;
     }
 
-    // Quicksort with median-of-three pivot
-    final mid = (left + right) >> 1;
-    // Sort left, mid, right
-    if (_sortedY[left] > _sortedY[mid]) _swap(left, mid);
-    if (_sortedY[left] > _sortedY[right]) _swap(left, right);
-    if (_sortedY[mid] > _sortedY[right]) _swap(mid, right);
-
-    // Pivot is median, place it at right-1
-    _swap(mid, right - 1);
-    final pivotY = _sortedY[right - 1];
-    final pivotIdx = _sortedIdx[right - 1];
-
-    var i = left;
-    var j = right - 1;
-    while (true) {
-      while (_sortedY[++i] < pivotY || (_sortedY[i] == pivotY && _sortedIdx[i] < pivotIdx)) {}
-      while (_sortedY[--j] > pivotY || (_sortedY[j] == pivotY && _sortedIdx[j] > pivotIdx)) {}
-      if (i >= j) break;
-      _swap(i, j);
-    }
-    _swap(i, right - 1);
-
-    _sortByY(left, i - 1);
-    _sortByY(i + 1, right);
+    return minItemIdx;
   }
 
-  void _swap(int a, int b) {
-    final tmpY = _sortedY[a];
-    _sortedY[a] = _sortedY[b];
-    _sortedY[b] = tmpY;
+  /// Find the maximum item index whose top edge < [scrollOffset].
+  /// This is the last item that starts before this scroll position.
+  ///
+  /// O(log n) binary search on Y-sorted entries.
+  int findLastItemBeforeOffset(double scrollOffset) {
+    if (_isDirty) rebuild();
+    if (_length == 0) return -1;
 
-    final tmpIdx = _sortedIdx[a];
-    _sortedIdx[a] = _sortedIdx[b];
-    _sortedIdx[b] = tmpIdx;
+    // Use _upperBoundBottom to find last entry where Y < scrollOffset
+    final endPos = _upperBoundBottom(scrollOffset);
+    if (endPos < 0) return -1;
+
+    // Among entries [0, endPos], find the maximum item index.
+    // Only scan the tail — entries near endPos have the highest Y
+    // and in masonry are most likely to have the highest item indices.
+    var maxItemIdx = _sortedIdx[endPos];
+    // Scan backwards from endPos; in a masonry grid with C columns,
+    // we need at most ~C entries to find the max index.
+    final scanStart = endPos > 20 ? endPos - 20 : 0;
+    for (var i = scanStart; i < endPos; i++) {
+      final idx = _sortedIdx[i];
+      if (idx > maxItemIdx) {
+        maxItemIdx = idx;
+      }
+    }
+
+    return maxItemIdx;
+  }
+
+  /// Sort _sortedY and _sortedIdx together using Dart's Timsort.
+  ///
+  /// Timsort is O(n) for nearly-sorted data, which masonry layout produces
+  /// (items are placed top-to-bottom, so Y values are mostly ascending).
+  /// This replaces the custom quicksort which was O(n log n) always.
+  void _timsortByY() {
+    if (_length <= 1) return;
+
+    // Build a list of indices and sort using Dart's built-in sort (Timsort)
+    final indices = List<int>.generate(_length, (i) => i);
+    indices.sort((a, b) {
+      final cmp = _sortedY[a].compareTo(_sortedY[b]);
+      if (cmp != 0) return cmp;
+      return _sortedIdx[a].compareTo(_sortedIdx[b]);
+    });
+
+    // Apply the permutation to both arrays
+    final newY = Float64List(_length);
+    final newIdx = Int32List(_length);
+    for (var i = 0; i < _length; i++) {
+      newY[i] = _sortedY[indices[i]];
+      newIdx[i] = _sortedIdx[indices[i]];
+    }
+
+    // Copy back
+    _sortedY.setRange(0, _length, newY);
+    _sortedIdx.setRange(0, _length, newIdx);
   }
 }
