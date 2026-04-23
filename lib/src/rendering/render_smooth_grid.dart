@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/rendering.dart' hide ItemExtentBuilder;
-import 'package:flutter/scheduler.dart';
 
 import '../core/layout_cache.dart';
 import '../core/layout_isolate.dart';
@@ -50,6 +49,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   // --- Auto-Isolate support ---
   bool? _useIsolate;
   bool _isolateInFlight = false;
+  List<double>? _cachedItemHeights; // cache heights to avoid re-materialization
+  int _cachedItemHeightsCount = 0;
 
   // --- Property setters (trigger relayout) ---
 
@@ -125,14 +126,28 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     _layoutJustRecomputed = false;
     if (_needsLayoutRecompute) {
       if (_shouldUseIsolate && !_isolateInFlight) {
-        // Async path: compute on Isolate, show old data while waiting
-        _computeLayoutOnIsolate();
-        // If we have no previous data, show empty
-        if (_totalScrollExtent <= 0) {
-          geometry = SliverGeometry.zero;
-          return;
+        // Large dataset: try cached heights first (instant column switch)
+        if (_cachedItemHeights != null &&
+            _cachedItemHeightsCount == _itemCount) {
+          // Heights cached — compute synchronously using cached data
+          // Only positions change (new column layout), heights are the same.
+          _totalScrollExtent = _layoutEngine.computeLayout(
+            itemCount: _itemCount,
+            itemExtentBuilder: (i) => _cachedItemHeights![i],
+            config: _layoutConfig,
+          );
+          _needsLayoutRecompute = false;
+          _layoutJustRecomputed = true;
+          _lastFirstIndex = -1;
+          _lastLastIndex = -1;
+        } else {
+          // First time — need to materialize heights (slow, use Isolate)
+          _computeLayoutOnIsolate();
+          if (_totalScrollExtent <= 0) {
+            geometry = SliverGeometry.zero;
+            return;
+          }
         }
-        // Otherwise keep displaying old data until Isolate finishes
       } else if (!_isolateInFlight) {
         // Sync path: compute on main thread
         _totalScrollExtent = _layoutEngine.computeLayout(
@@ -142,8 +157,18 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
         );
         _needsLayoutRecompute = false;
         _layoutJustRecomputed = true;
-        _lastFirstIndex = -1; // Force full child management
+        _lastFirstIndex = -1;
         _lastLastIndex = -1;
+
+        // Cache heights for future column switches
+        if (_itemCount > LayoutIsolateManager.kIsolateThreshold) {
+          _cachedItemHeights = List<double>.generate(
+            _itemCount,
+            _itemExtentBuilder,
+            growable: false,
+          );
+          _cachedItemHeightsCount = _itemCount;
+        }
       }
     }
 
@@ -405,80 +430,50 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     markNeedsLayout();
   }
 
-  /// Compute layout on a background Isolate.
-  ///
-  /// **Viewport-first** Isolate strategy:
-  /// 1. Compute first [_kPartialCount] items synchronously → instant visual.
-  /// 2. Pre-materialize remaining heights and send to Isolate.
-  /// 3. When Isolate finishes → full update.
-  static const int _kPartialCount = 500;
-
+  /// First-time Isolate computation: materializes heights and computes layout.
+  /// After completion, heights are cached in [_cachedItemHeights] so future
+  /// column switches use the synchronous path (instant).
   void _computeLayoutOnIsolate() {
     _isolateInFlight = true;
 
     final itemCount = _itemCount;
     final config = _layoutConfig;
 
-    // ── Step 1: Quick partial layout (main thread) ──
-    // Compute only the first chunk so the visible area updates instantly.
-    final partialCount = math.min(itemCount, _kPartialCount);
-    _totalScrollExtent = _layoutEngine.computeLayout(
-      itemCount: partialCount,
-      itemExtentBuilder: _itemExtentBuilder,
-      config: config,
+    // Pre-materialize heights on main thread (required — closures can't
+    // cross Isolate boundary). This is O(n) but only happens ONCE.
+    final itemHeights = List<double>.generate(
+      itemCount,
+      _itemExtentBuilder,
+      growable: false,
     );
 
-    // Estimate total height from partial computation
-    if (itemCount > partialCount && _totalScrollExtent > 0) {
-      _totalScrollExtent *= itemCount / partialCount;
-    }
+    // Cache heights for future column switches (instant reuse)
+    _cachedItemHeights = itemHeights;
+    _cachedItemHeightsCount = itemCount;
 
-    _needsLayoutRecompute = false;
-    _layoutJustRecomputed = true;
-    _lastFirstIndex = -1;
-    _lastLastIndex = -1;
+    LayoutIsolateManager.computeLayout(
+      cache: _layoutCache,
+      spatialIndex: _spatialIndex,
+      itemCount: itemCount,
+      itemHeights: itemHeights,
+      crossAxisCount: config.crossAxisCount,
+      mainAxisSpacing: config.mainAxisSpacing,
+      crossAxisSpacing: config.crossAxisSpacing,
+      viewportWidth: config.viewportWidth,
+      paddingLeft: config.paddingLeft,
+      paddingRight: config.paddingRight,
+      paddingTop: config.paddingTop,
+      paddingBottom: config.paddingBottom,
+    ).then((totalHeight) {
+      _totalScrollExtent = totalHeight;
+      _needsLayoutRecompute = false;
+      _isolateInFlight = false;
+      _lastFirstIndex = -1;
+      _lastLastIndex = -1;
 
-    // ── Step 2: Pre-materialize heights for Isolate ──
-    // This still runs on main thread but after layout frame is done.
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (!attached) {
-        _isolateInFlight = false;
-        return;
+      if (attached) {
+        markNeedsLayout();
       }
-
-      // Materialize heights in a microtask to avoid blocking the frame
-      Future.microtask(() {
-        final itemHeights = List<double>.generate(
-          itemCount,
-          _itemExtentBuilder,
-          growable: false,
-        );
-
-        return LayoutIsolateManager.computeLayout(
-          cache: _layoutCache,
-          spatialIndex: _spatialIndex,
-          itemCount: itemCount,
-          itemHeights: itemHeights,
-          crossAxisCount: config.crossAxisCount,
-          mainAxisSpacing: config.mainAxisSpacing,
-          crossAxisSpacing: config.crossAxisSpacing,
-          viewportWidth: config.viewportWidth,
-          paddingLeft: config.paddingLeft,
-          paddingRight: config.paddingRight,
-          paddingTop: config.paddingTop,
-          paddingBottom: config.paddingBottom,
-        );
-      }).then((totalHeight) {
-        _totalScrollExtent = totalHeight;
-        _isolateInFlight = false;
-        _layoutJustRecomputed = true;
-        _lastFirstIndex = -1;
-        _lastLastIndex = -1;
-
-        if (attached) {
-          markNeedsLayout();
-        }
-      });
     });
   }
 }
