@@ -49,12 +49,22 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   // --- Property setters (trigger relayout) ---
 
   set layoutConfig(MasonryLayoutConfig value) {
-    if (_layoutConfig.crossAxisCount != value.crossAxisCount ||
+    final configChanged =
+        _layoutConfig.crossAxisCount != value.crossAxisCount ||
         _layoutConfig.mainAxisSpacing != value.mainAxisSpacing ||
-        _layoutConfig.crossAxisSpacing != value.crossAxisSpacing ||
-        _layoutConfig.viewportWidth != value.viewportWidth) {
+        _layoutConfig.crossAxisSpacing != value.crossAxisSpacing;
+
+    if (configChanged || _layoutConfig.viewportWidth != value.viewportWidth) {
       _layoutConfig = value;
       _needsLayoutRecompute = true;
+
+      if (configChanged) {
+        // Config changed structurally — all item positions are invalid.
+        // Must clear cache and remove all children.
+        _layoutCache.clear();
+        _spatialIndex.invalidate();
+      }
+
       markNeedsLayout();
     }
   }
