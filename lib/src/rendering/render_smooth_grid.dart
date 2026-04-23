@@ -204,9 +204,6 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
         return;
       }
       _layoutChildAt(firstChild!, firstIndex);
-    } else if (_layoutJustRecomputed) {
-      // Config changed — re-layout existing firstChild with new cache data
-      _layoutChildAt(firstChild!, indexOf(firstChild!));
     }
 
     // ── Step 3: Walk backward to firstIndex ──
@@ -222,19 +219,28 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       currentLeadingIndex = targetIndex;
     }
 
-    // ── Step 4: Walk forward — only re-layout if config changed ──
-    var trailingChild = firstChild!;
-    while (childAfter(trailingChild) != null) {
-      trailingChild = childAfter(trailingChild)!;
-      if (_layoutJustRecomputed) {
+    // ── Step 4: Re-layout existing children ONLY when config changed ──
+    // Use lastChild to skip the O(visible) walk on normal scroll frames.
+    RenderBox trailingChild;
+    if (_layoutJustRecomputed) {
+      // Config changed — must re-layout ALL existing children with new sizes
+      trailingChild = firstChild!;
+      while (childAfter(trailingChild) != null) {
+        trailingChild = childAfter(trailingChild)!;
         _layoutChildAt(trailingChild, indexOf(trailingChild));
       }
+      // Also ensure firstChild is re-laid out
+      _layoutChildAt(firstChild!, indexOf(firstChild!));
+    } else {
+      // Normal scroll — skip directly to lastChild (O(1) instead of O(visible))
+      trailingChild = lastChild ?? firstChild!;
     }
 
-    // Create new children going forward
-    while (indexOf(trailingChild) < lastIndex) {
-      final nextIndex = indexOf(trailingChild) + 1;
-      if (nextIndex > lastIndex || nextIndex >= _itemCount) break;
+    // ── Step 5: Create new children going forward ──
+    var trailingIndex = indexOf(trailingChild);
+    while (trailingIndex < lastIndex) {
+      final nextIndex = trailingIndex + 1;
+      if (nextIndex >= _itemCount) break;
 
       final r = _layoutCache.getRaw(nextIndex);
       final child = insertAndLayoutChild(
@@ -247,9 +253,10 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       }
       _applyParentDataRaw(child, nextIndex, r.x, r.y);
       trailingChild = child;
+      trailingIndex = nextIndex;
     }
 
-    // ── Step 5: Compute geometry ──
+    // ── Step 6: Compute geometry ──
     _setGeometry(scrollOffset, remainingPaintExtent);
   }
 
@@ -293,7 +300,6 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     final data = child.parentData! as SmoothGridParentData;
     data.layoutOffset = y;
     data.crossAxisOffset = x;
-    data.column = _getColumnForX(x);
   }
 
   /// Count children before [firstIndex] that should be garbage collected.
@@ -383,16 +389,6 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   double childCrossAxisPosition(RenderBox child) {
     final data = child.parentData! as SmoothGridParentData;
     return data.crossAxisOffset;
-  }
-
-  int _getColumnForX(double x) {
-    final relativeX = x - _layoutConfig.paddingLeft;
-    final colWidth = _layoutConfig.columnWidth + _layoutConfig.crossAxisSpacing;
-    if (colWidth <= 0) return 0;
-    return (relativeX / colWidth).floor().clamp(
-      0,
-      _layoutConfig.crossAxisCount - 1,
-    );
   }
 
   /// Notify that items have been reordered (for drag-drop).
