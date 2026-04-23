@@ -369,6 +369,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       itemExtentBuilder: _itemExtentBuilder,
       config: _layoutConfig,
     );
+    // Incremental spatial index rebuild — only update changed items
+    _spatialIndex.rebuildFrom(fromIndex);
     markNeedsLayout();
   }
 

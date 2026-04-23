@@ -65,6 +65,41 @@ class SpatialIndex {
     _isDirty = false;
   }
 
+  /// Incrementally rebuild the spatial index from [fromIndex] onward.
+  ///
+  /// Only updates Y values for items ≥ fromIndex, then re-sorts.
+  /// This is O(k) for updating + O(n log n) worst-case sort, but Timsort
+  /// on a nearly-sorted array (only tail changed) runs in ~O(n + k log k).
+  ///
+  /// Use after [MasonryLayoutEngine.recomputeFrom] or item reorder.
+  void rebuildFrom(int fromIndex) {
+    final n = _cache.totalItems;
+    if (n == 0 || fromIndex >= n) {
+      _isDirty = false;
+      return;
+    }
+
+    // If array size changed, do full rebuild
+    if (_length != n) {
+      rebuild();
+      return;
+    }
+
+    // Update only the Y values that changed (fromIndex onward)
+    // We need to find these entries in sorted arrays and update them
+    for (var i = 0; i < _length; i++) {
+      final itemIdx = _sortedIdx[i];
+      if (itemIdx >= fromIndex) {
+        _sortedY[i] = _cache.getY(itemIdx);
+      }
+    }
+
+    // Re-sort — Timsort is ~O(n) when only a tail portion is out of order
+    _timsortByY();
+
+    _isDirty = false;
+  }
+
   /// Query the range of item indices whose rects intersect [top, bottom].
   ///
   /// Returns (startIndex, endIndex) inclusive.
