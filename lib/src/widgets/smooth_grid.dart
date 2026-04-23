@@ -240,7 +240,7 @@ class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
       layoutConfig: config,
       itemExtentBuilder: gridDelegate.itemExtentBuilder,
       itemCount: itemCount,
-    );
+    )..useIsolate = useIsolate;
   }
 
   @override
@@ -253,6 +253,7 @@ class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
     renderObject
       ..layoutConfig = config
       ..itemExtentBuilder = gridDelegate.itemExtentBuilder
-      ..itemCount = itemCount;
+      ..itemCount = itemCount
+      ..useIsolate = useIsolate;
   }
 }

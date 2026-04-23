@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/rendering.dart' hide ItemExtentBuilder;
+import 'package:flutter/scheduler.dart';
 
 import '../core/layout_cache.dart';
+import '../core/layout_isolate.dart';
 import '../core/masonry_layout_engine.dart';
 import '../core/spatial_index.dart';
 import 'smooth_grid_parent_data.dart';
@@ -40,6 +42,10 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   double _totalScrollExtent = 0;
   bool _needsLayoutRecompute = true;
 
+  // --- Auto-Isolate support ---
+  bool? _useIsolate;
+  bool _isolateInFlight = false;
+
   // --- Property setters (trigger relayout) ---
 
   set layoutConfig(MasonryLayoutConfig value) {
@@ -67,6 +73,19 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     }
   }
 
+  /// Controls Isolate usage.
+  /// - `null`: auto (use Isolate for >100K items)
+  /// - `true`: always use Isolate
+  /// - `false`: never use Isolate
+  set useIsolate(bool? value) {
+    _useIsolate = value;
+  }
+
+  bool get _shouldUseIsolate {
+    if (_useIsolate != null) return _useIsolate!;
+    return _itemCount > LayoutIsolateManager.kIsolateThreshold;
+  }
+
   @override
   void setupParentData(RenderObject child) {
     if (child.parentData is! SmoothGridParentData) {
@@ -88,12 +107,24 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
 
     // Recompute full masonry layout if needed
     if (_needsLayoutRecompute) {
-      _totalScrollExtent = _layoutEngine.computeLayout(
-        itemCount: _itemCount,
-        itemExtentBuilder: _itemExtentBuilder,
-        config: _layoutConfig,
-      );
-      _needsLayoutRecompute = false;
+      if (_shouldUseIsolate && !_isolateInFlight) {
+        // Async path: compute on Isolate, show old data while waiting
+        _computeLayoutOnIsolate();
+        // If we have no previous data, show empty
+        if (_totalScrollExtent <= 0) {
+          geometry = SliverGeometry.zero;
+          return;
+        }
+        // Otherwise keep displaying old data until Isolate finishes
+      } else if (!_isolateInFlight) {
+        // Sync path: compute on main thread
+        _totalScrollExtent = _layoutEngine.computeLayout(
+          itemCount: _itemCount,
+          itemExtentBuilder: _itemExtentBuilder,
+          config: _layoutConfig,
+        );
+        _needsLayoutRecompute = false;
+      }
     }
 
     if (_itemCount == 0) {
@@ -339,5 +370,48 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       config: _layoutConfig,
     );
     markNeedsLayout();
+  }
+
+  /// Compute layout on a background Isolate.
+  ///
+  /// Pre-materializes [_itemExtentBuilder] into a flat [List<double>],
+  /// sends to Isolate, and triggers relayout when results arrive.
+  void _computeLayoutOnIsolate() {
+    _isolateInFlight = true;
+
+    // Pre-materialize heights (must be done on main thread — callback access)
+    final itemCount = _itemCount;
+    final itemHeights = List<double>.generate(
+      itemCount,
+      _itemExtentBuilder,
+      growable: false,
+    );
+    final config = _layoutConfig;
+
+    LayoutIsolateManager.computeLayout(
+      cache: _layoutCache,
+      spatialIndex: _spatialIndex,
+      itemCount: itemCount,
+      itemHeights: itemHeights,
+      crossAxisCount: config.crossAxisCount,
+      mainAxisSpacing: config.mainAxisSpacing,
+      crossAxisSpacing: config.crossAxisSpacing,
+      viewportWidth: config.viewportWidth,
+      paddingLeft: config.paddingLeft,
+      paddingRight: config.paddingRight,
+      paddingTop: config.paddingTop,
+      paddingBottom: config.paddingBottom,
+    ).then((totalHeight) {
+      _totalScrollExtent = totalHeight;
+      _needsLayoutRecompute = false;
+      _isolateInFlight = false;
+
+      // Schedule relayout on next frame (safe from Isolate callback)
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (attached) {
+          markNeedsLayout();
+        }
+      });
+    });
   }
 }
