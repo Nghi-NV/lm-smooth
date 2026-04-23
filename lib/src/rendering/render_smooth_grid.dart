@@ -407,40 +407,74 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
 
   /// Compute layout on a background Isolate.
   ///
-  /// Pre-materializes [_itemExtentBuilder] into a flat [List<double>],
-  /// sends to Isolate, and triggers relayout when results arrive.
+  /// **Viewport-first** Isolate strategy:
+  /// 1. Compute first [_kPartialCount] items synchronously → instant visual.
+  /// 2. Pre-materialize remaining heights and send to Isolate.
+  /// 3. When Isolate finishes → full update.
+  static const int _kPartialCount = 500;
+
   void _computeLayoutOnIsolate() {
     _isolateInFlight = true;
 
-    // Pre-materialize heights (must be done on main thread — callback access)
     final itemCount = _itemCount;
-    final itemHeights = List<double>.generate(
-      itemCount,
-      _itemExtentBuilder,
-      growable: false,
-    );
     final config = _layoutConfig;
 
-    LayoutIsolateManager.computeLayout(
-      cache: _layoutCache,
-      spatialIndex: _spatialIndex,
-      itemCount: itemCount,
-      itemHeights: itemHeights,
-      crossAxisCount: config.crossAxisCount,
-      mainAxisSpacing: config.mainAxisSpacing,
-      crossAxisSpacing: config.crossAxisSpacing,
-      viewportWidth: config.viewportWidth,
-      paddingLeft: config.paddingLeft,
-      paddingRight: config.paddingRight,
-      paddingTop: config.paddingTop,
-      paddingBottom: config.paddingBottom,
-    ).then((totalHeight) {
-      _totalScrollExtent = totalHeight;
-      _needsLayoutRecompute = false;
-      _isolateInFlight = false;
+    // ── Step 1: Quick partial layout (main thread) ──
+    // Compute only the first chunk so the visible area updates instantly.
+    final partialCount = math.min(itemCount, _kPartialCount);
+    _totalScrollExtent = _layoutEngine.computeLayout(
+      itemCount: partialCount,
+      itemExtentBuilder: _itemExtentBuilder,
+      config: config,
+    );
 
-      // Schedule relayout on next frame (safe from Isolate callback)
-      SchedulerBinding.instance.addPostFrameCallback((_) {
+    // Estimate total height from partial computation
+    if (itemCount > partialCount && _totalScrollExtent > 0) {
+      _totalScrollExtent *= itemCount / partialCount;
+    }
+
+    _needsLayoutRecompute = false;
+    _layoutJustRecomputed = true;
+    _lastFirstIndex = -1;
+    _lastLastIndex = -1;
+
+    // ── Step 2: Pre-materialize heights for Isolate ──
+    // This still runs on main thread but after layout frame is done.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!attached) {
+        _isolateInFlight = false;
+        return;
+      }
+
+      // Materialize heights in a microtask to avoid blocking the frame
+      Future.microtask(() {
+        final itemHeights = List<double>.generate(
+          itemCount,
+          _itemExtentBuilder,
+          growable: false,
+        );
+
+        return LayoutIsolateManager.computeLayout(
+          cache: _layoutCache,
+          spatialIndex: _spatialIndex,
+          itemCount: itemCount,
+          itemHeights: itemHeights,
+          crossAxisCount: config.crossAxisCount,
+          mainAxisSpacing: config.mainAxisSpacing,
+          crossAxisSpacing: config.crossAxisSpacing,
+          viewportWidth: config.viewportWidth,
+          paddingLeft: config.paddingLeft,
+          paddingRight: config.paddingRight,
+          paddingTop: config.paddingTop,
+          paddingBottom: config.paddingBottom,
+        );
+      }).then((totalHeight) {
+        _totalScrollExtent = totalHeight;
+        _isolateInFlight = false;
+        _layoutJustRecomputed = true;
+        _lastFirstIndex = -1;
+        _lastLastIndex = -1;
+
         if (attached) {
           markNeedsLayout();
         }
