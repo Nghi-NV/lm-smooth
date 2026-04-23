@@ -1,9 +1,6 @@
 import 'package:flutter/widgets.dart';
 
-import '../core/layout_cache.dart';
-import '../core/masonry_layout_engine.dart';
-import '../core/spatial_index.dart';
-import '../rendering/smooth_sliver_grid_delegate.dart';
+import '../rendering/render_smooth_grid.dart';
 import 'smooth_grid_delegate.dart';
 
 /// A high-performance staggered/masonry grid view.
@@ -12,6 +9,10 @@ import 'smooth_grid_delegate.dart';
 /// - Pre-computing layout positions (no measure pass)
 /// - Only building visible children via [SliverChildBuilderDelegate]
 /// - Using [LayoutCache] with O(1) lookups and [SpatialIndex] with O(log n) queries
+/// - **No LayoutBuilder overhead** — constraints read directly in RenderSliver
+///
+/// For datasets >100K items, layout is automatically computed on a background
+/// Isolate to avoid blocking the main thread. Set [useIsolate] to override.
 ///
 /// ## Basic Usage
 /// ```dart
@@ -71,6 +72,12 @@ class SmoothGrid extends StatefulWidget {
   /// Whether the grid has a fixed extent and shrinks to fit.
   final bool shrinkWrap;
 
+  /// Controls Isolate usage for layout computation.
+  /// - `null` (default): auto-detect (use Isolate for >100K items)
+  /// - `true`: always use Isolate
+  /// - `false`: never use Isolate
+  final bool? useIsolate;
+
   const SmoothGrid({
     super.key,
     required this.itemCount,
@@ -87,6 +94,7 @@ class SmoothGrid extends StatefulWidget {
     this.cacheExtent,
     this.scrollDirection = Axis.vertical,
     this.shrinkWrap = false,
+    this.useIsolate,
   }) : assert(
          !reorderable || onReorder != null,
          'onReorder must be provided when reorderable is true',
@@ -97,112 +105,27 @@ class SmoothGrid extends StatefulWidget {
 }
 
 class _SmoothGridState extends State<SmoothGrid> {
-  final LayoutCache _cache = LayoutCache();
-  late final SpatialIndex _spatialIndex = SpatialIndex(_cache);
-  late final MasonryLayoutEngine _engine = MasonryLayoutEngine(
-    cache: _cache,
-    spatialIndex: _spatialIndex,
-  );
-
-  double _totalExtent = 0;
-  double _lastViewportWidth = -1;
-  bool _needsRecompute = true;
-
-  // Track config changes
-  int _lastItemCount = -1;
-  int _lastCrossAxisCount = -1;
-  double _lastMainAxisSpacing = -1;
-  double _lastCrossAxisSpacing = -1;
-
-  // Cached delegates — avoid re-allocation per build
-  SmoothSliverGridDelegate? _gridDelegate;
-  SliverChildBuilderDelegate? _childDelegate;
-
-  @override
-  void didUpdateWidget(covariant SmoothGrid oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final del = widget.delegate;
-    if (widget.itemCount != _lastItemCount ||
-        del.crossAxisCount != _lastCrossAxisCount ||
-        del.mainAxisSpacing != _lastMainAxisSpacing ||
-        del.crossAxisSpacing != _lastCrossAxisSpacing) {
-      _needsRecompute = true;
-      _gridDelegate = null; // Invalidate cached delegate
-      _childDelegate = null;
-    }
-  }
-
-  void _ensureLayout(double viewportWidth) {
-    if (viewportWidth <= 0) return; // Guard: no valid viewport yet
-    if (!_needsRecompute && viewportWidth == _lastViewportWidth) return;
-
-    final del = widget.delegate;
-    final config = del.toConfig(viewportWidth);
-
-    _totalExtent = _engine.computeLayout(
-      itemCount: widget.itemCount,
-      itemExtentBuilder: del.itemExtentBuilder,
-      config: config,
-    );
-
-    _lastViewportWidth = viewportWidth;
-    _lastItemCount = widget.itemCount;
-    _lastCrossAxisCount = del.crossAxisCount;
-    _lastMainAxisSpacing = del.mainAxisSpacing;
-    _lastCrossAxisSpacing = del.crossAxisSpacing;
-    _needsRecompute = false;
-    _gridDelegate = null; // Invalidate after recompute
-    _childDelegate = null;
-  }
-
-  SmoothSliverGridDelegate _getGridDelegate() {
-    return _gridDelegate ??= SmoothSliverGridDelegate(
-      cache: _cache,
-      spatialIndex: _spatialIndex,
-      totalExtent: _totalExtent,
-      itemCount: widget.itemCount,
-    );
-  }
-
-  SliverChildBuilderDelegate _getChildDelegate() {
-    return _childDelegate ??= SliverChildBuilderDelegate(
-      _buildItem,
-      childCount: widget.itemCount,
-      addRepaintBoundaries: widget.addRepaintBoundaries,
-      addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final viewportWidth = widget.scrollDirection == Axis.vertical
-            ? constraints.maxWidth
-            : constraints.maxHeight;
-
-        // Skip rendering if viewport has no size yet (first frame)
-        if (viewportWidth <= 0) {
-          return const SizedBox.shrink();
-        }
-
-        // Pre-compute layout before building SliverGrid
-        _ensureLayout(viewportWidth);
-
-        return CustomScrollView(
-          controller: widget.controller,
-          physics: widget.physics,
-          scrollDirection: widget.scrollDirection,
-          shrinkWrap: widget.shrinkWrap,
-          cacheExtent: widget.cacheExtent,
-          slivers: [
-            SliverGrid(
-              gridDelegate: _getGridDelegate(),
-              delegate: _getChildDelegate(),
-            ),
-          ],
-        );
-      },
+    // NO LayoutBuilder! Constraints are read directly by RenderSmoothGrid
+    // in performLayout() via constraints.crossAxisExtent.
+    // This eliminates an extra build frame on resize.
+    return CustomScrollView(
+      controller: widget.controller,
+      physics: widget.physics,
+      scrollDirection: widget.scrollDirection,
+      shrinkWrap: widget.shrinkWrap,
+      cacheExtent: widget.cacheExtent,
+      slivers: [
+        _SmoothGridSliver(
+          itemCount: widget.itemCount,
+          itemBuilder: _buildItem,
+          gridDelegate: widget.delegate,
+          addRepaintBoundaries: widget.addRepaintBoundaries,
+          addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
+          useIsolate: widget.useIsolate,
+        ),
+      ],
     );
   }
 
@@ -234,16 +157,14 @@ class _SmoothGridState extends State<SmoothGrid> {
       data: index,
       delay: const Duration(milliseconds: 300),
       hapticFeedbackOnStart: true,
-      // Ghost feedback shown while dragging
       feedback: SizedBox(
-        width: _cache.totalItems > index ? _cache.getRaw(index).w : 120,
-        height: _cache.totalItems > index ? _cache.getRaw(index).h : 120,
+        width: 120,
+        height: 120,
         child: Opacity(
           opacity: 0.85,
           child: Transform.scale(scale: 1.05, child: child),
         ),
       ),
-      // Dim the original item while dragging
       childWhenDragging: Opacity(opacity: 0.3, child: child),
       child: DragTarget<int>(
         onWillAcceptWithDetails: (details) => details.data != index,
@@ -252,7 +173,6 @@ class _SmoothGridState extends State<SmoothGrid> {
           widget.onReorder?.call(oldIndex, index);
         },
         builder: (context, candidateData, rejectedData) {
-          // Highlight when a draggable hovers over this target
           if (candidateData.isNotEmpty) {
             return Container(
               decoration: BoxDecoration(
@@ -262,7 +182,6 @@ class _SmoothGridState extends State<SmoothGrid> {
               child: child,
             );
           }
-          // Wrap with tap handler in reorderable mode
           if (widget.onTap != null) {
             return GestureDetector(
               onTap: () => widget.onTap!(index),
@@ -273,5 +192,67 @@ class _SmoothGridState extends State<SmoothGrid> {
         },
       ),
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _SmoothGridSliver: Direct RenderObjectWidget → RenderSmoothGrid
+// ---------------------------------------------------------------------------
+
+/// A sliver that creates a [RenderSmoothGrid] directly, bypassing
+/// the SliverGrid → SliverGridDelegate indirection.
+///
+/// This avoids LayoutBuilder overhead and gives the RenderObject direct
+/// access to sliver constraints for viewport-width-based layout.
+class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
+  final SmoothGridDelegate gridDelegate;
+  final int itemCount;
+  final bool? useIsolate;
+
+  _SmoothGridSliver({
+    required this.itemCount,
+    required IndexedWidgetBuilder itemBuilder,
+    required this.gridDelegate,
+    required bool addRepaintBoundaries,
+    required bool addAutomaticKeepAlives,
+    this.useIsolate,
+  }) : super(
+         delegate: SliverChildBuilderDelegate(
+           itemBuilder,
+           childCount: itemCount,
+           addRepaintBoundaries: addRepaintBoundaries,
+           addAutomaticKeepAlives: addAutomaticKeepAlives,
+         ),
+       );
+
+  @override
+  SliverMultiBoxAdaptorElement createElement() =>
+      SliverMultiBoxAdaptorElement(this, replaceMovedChildren: true);
+
+  @override
+  RenderSmoothGrid createRenderObject(BuildContext context) {
+    final element = context as SliverMultiBoxAdaptorElement;
+    // viewportWidth=0 initially; RenderSmoothGrid.performLayout() detects
+    // the real width from constraints.crossAxisExtent and triggers recompute.
+    final config = gridDelegate.toConfig(0);
+    return RenderSmoothGrid(
+      childManager: element,
+      layoutConfig: config,
+      itemExtentBuilder: gridDelegate.itemExtentBuilder,
+      itemCount: itemCount,
+    );
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant RenderSmoothGrid renderObject,
+  ) {
+    // viewportWidth=0 here; actual width comes from performLayout constraints
+    final config = gridDelegate.toConfig(0);
+    renderObject
+      ..layoutConfig = config
+      ..itemExtentBuilder = gridDelegate.itemExtentBuilder
+      ..itemCount = itemCount;
   }
 }
