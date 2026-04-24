@@ -287,7 +287,7 @@ void main() {
       );
 
       expect(preview[1], const Offset(0, -90));
-      expect(preview[2], const Offset(0, -110));
+      expect(preview.containsKey(2), isFalse);
       expect(preview.containsKey(0), isFalse);
       expect(preview.containsKey(3), isFalse);
     });
@@ -336,54 +336,19 @@ void main() {
       );
     });
 
-    test('prefers item under pointer in multi-column grid', () {
-      final engine = SmoothDragEngine(collisionHysteresis: 10);
+    test('keeps slot stable near the before/after split of the same item', () {
+      final engine = SmoothDragEngine(collisionHysteresis: 12);
       final rects = <int, Rect>{
-        0: const Rect.fromLTWH(0, 0, 100, 100),
-        1: const Rect.fromLTWH(110, 0, 100, 100),
-        2: const Rect.fromLTWH(220, 0, 100, 100),
-        3: const Rect.fromLTWH(0, 110, 100, 100),
-        4: const Rect.fromLTWH(110, 110, 100, 100),
-        5: const Rect.fromLTWH(220, 110, 100, 100),
+        0: const Rect.fromLTWH(0, 0, 100, 80),
+        1: const Rect.fromLTWH(0, 90, 100, 80),
+        2: const Rect.fromLTWH(0, 180, 100, 80),
       };
 
       engine.startDrag(
         index: 0,
         dragRect: rects[0]!,
-        pointerGlobal: const Offset(150, 150),
-        pointerLocal: const Offset(150, 150),
-      );
-
-      expect(
-        engine.computeTargetIndex(
-          candidateIndices: const [0, 1, 2, 3, 4, 5],
-          getItemRect: (index) => rects[index]!,
-          viewportTop: 0,
-          viewportBottom: 300,
-          maxTargetIndex: 5,
-        ),
-        4,
-      );
-    });
-
-    test('prefers overlap with dragged rect when moving across columns', () {
-      final engine = SmoothDragEngine(collisionHysteresis: 10);
-      final rects = <int, Rect>{
-        0: const Rect.fromLTWH(0, 0, 100, 100),
-        1: const Rect.fromLTWH(110, 0, 100, 100),
-        2: const Rect.fromLTWH(220, 0, 100, 100),
-      };
-
-      engine.startDrag(
-        index: 0,
-        dragRect: rects[0]!,
-        pointerGlobal: const Offset(50, 50),
-        pointerLocal: const Offset(50, 50),
-      );
-      engine.updatePointer(
-        pointerGlobal: const Offset(165, 50),
-        pointerLocal: const Offset(160, 50),
-        draggedTopLeft: const Offset(115, 0),
+        pointerGlobal: const Offset(10, 120),
+        pointerLocal: const Offset(10, 120),
       );
 
       expect(
@@ -391,8 +356,42 @@ void main() {
           candidateIndices: const [0, 1, 2],
           getItemRect: (index) => rects[index]!,
           viewportTop: 0,
-          viewportBottom: 120,
-          maxTargetIndex: 2,
+          viewportBottom: 300,
+          maxTargetIndex: 3,
+        ),
+        1,
+      );
+
+      engine.updatePointer(
+        pointerGlobal: const Offset(10, 136),
+        pointerLocal: const Offset(10, 136),
+        draggedTopLeft: const Offset(0, 126),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 300,
+          maxTargetIndex: 3,
+        ),
+        1,
+      );
+
+      engine.updatePointer(
+        pointerGlobal: const Offset(10, 142),
+        pointerLocal: const Offset(10, 142),
+        draggedTopLeft: const Offset(0, 132),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 300,
+          maxTargetIndex: 3,
         ),
         1,
       );
@@ -422,6 +421,33 @@ void main() {
           maxTargetIndex: 2,
         ),
         2,
+      );
+    });
+
+    test('allows appending after the last item', () {
+      final engine = SmoothDragEngine(collisionHysteresis: 10);
+      final rects = <int, Rect>{
+        0: const Rect.fromLTWH(0, 0, 100, 80),
+        1: const Rect.fromLTWH(0, 90, 100, 80),
+        2: const Rect.fromLTWH(0, 180, 100, 80),
+      };
+
+      engine.startDrag(
+        index: 0,
+        dragRect: rects[0]!,
+        pointerGlobal: const Offset(10, 240),
+        pointerLocal: const Offset(10, 240),
+      );
+
+      expect(
+        engine.computeTargetIndex(
+          candidateIndices: const [0, 1, 2],
+          getItemRect: (index) => rects[index]!,
+          viewportTop: 0,
+          viewportBottom: 300,
+          maxTargetIndex: 3,
+        ),
+        3,
       );
     });
   });
@@ -475,7 +501,9 @@ void main() {
   });
 
   group('SmoothGrid reorder', () {
-    testWidgets('long press drag reorders with overlay preview', (tester) async {
+    testWidgets('long press drag reorders with overlay preview', (
+      tester,
+    ) async {
       final items = List<int>.generate(8, (i) => i);
 
       await tester.pumpWidget(
@@ -505,7 +533,10 @@ void main() {
                   onReorder: (oldIndex, newIndex) {
                     setState(() {
                       final item = items.removeAt(oldIndex);
-                      items.insert(newIndex > oldIndex ? newIndex - 1 : newIndex, item);
+                      items.insert(
+                        newIndex > oldIndex ? newIndex - 1 : newIndex,
+                        item,
+                      );
                     });
                   },
                 ),
@@ -528,62 +559,64 @@ void main() {
       expect(items.indexOf(0), greaterThan(0));
     });
 
-    testWidgets('drop immediately after crossing boundary uses latest preview target',
-        (tester) async {
-      final items = List<int>.generate(5, (i) => i);
+    testWidgets(
+      'drop immediately after crossing boundary uses latest preview target',
+      (tester) async {
+        final items = List<int>.generate(5, (i) => i);
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: StatefulBuilder(
-            builder: (context, setState) {
-              return Scaffold(
-                body: SmoothGrid(
-                  itemCount: items.length,
-                  reorderable: true,
-                  reorderConfig: const SmoothReorderConfig(
-                    longPressDelay: Duration(milliseconds: 220),
-                  ),
-                  delegate: SmoothGridDelegate.count(
-                    crossAxisCount: 1,
-                    mainAxisSpacing: 8,
-                    itemExtentBuilder: (_) => 80,
-                  ),
-                  itemBuilder: (context, index) => SmoothGridTile(
-                    child: Container(
-                      key: ValueKey('immediate_item_${items[index]}'),
-                      alignment: Alignment.center,
-                      color: Colors.green,
-                      child: Text('${items[index]}'),
+        await tester.pumpWidget(
+          MaterialApp(
+            home: StatefulBuilder(
+              builder: (context, setState) {
+                return Scaffold(
+                  body: SmoothGrid(
+                    itemCount: items.length,
+                    reorderable: true,
+                    reorderConfig: const SmoothReorderConfig(
+                      longPressDelay: Duration(milliseconds: 220),
                     ),
+                    delegate: SmoothGridDelegate.count(
+                      crossAxisCount: 1,
+                      mainAxisSpacing: 8,
+                      itemExtentBuilder: (_) => 80,
+                    ),
+                    itemBuilder: (context, index) => SmoothGridTile(
+                      child: Container(
+                        key: ValueKey('immediate_item_${items[index]}'),
+                        alignment: Alignment.center,
+                        color: Colors.green,
+                        child: Text('${items[index]}'),
+                      ),
+                    ),
+                    onReorder: (oldIndex, newIndex) {
+                      setState(() {
+                        final item = items.removeAt(oldIndex);
+                        items.insert(
+                          newIndex > oldIndex ? newIndex - 1 : newIndex,
+                          item,
+                        );
+                      });
+                    },
                   ),
-                  onReorder: (oldIndex, newIndex) {
-                    setState(() {
-                      final item = items.removeAt(oldIndex);
-                      items.insert(
-                        newIndex > oldIndex ? newIndex - 1 : newIndex,
-                        item,
-                      );
-                    });
-                  },
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
-        ),
-      );
+        );
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byKey(const ValueKey('immediate_item_0'))),
-      );
-      await tester.pump(const Duration(milliseconds: 250));
-      await gesture.moveBy(const Offset(0, 150));
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byKey(const ValueKey('immediate_item_0'))),
+        );
+        await tester.pump(const Duration(milliseconds: 250));
+        await gesture.moveBy(const Offset(0, 150));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
 
-      expect(items.first, isNot(0));
-      expect(items.indexOf(0), 1);
-    });
+        expect(items.first, isNot(0));
+        expect(items.indexOf(0), 1);
+      },
+    );
 
     testWidgets('drag near bottom auto-scrolls', (tester) async {
       final controller = ScrollController();
@@ -617,7 +650,9 @@ void main() {
         ),
       );
 
-      final start = tester.getCenter(find.byKey(const ValueKey('scroll_item_0')));
+      final start = tester.getCenter(
+        find.byKey(const ValueKey('scroll_item_0')),
+      );
       final gridRect = tester.getRect(find.byType(SmoothGrid));
       final gesture = await tester.startGesture(start);
       await tester.pump(const Duration(milliseconds: 250));
@@ -632,8 +667,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
     });
 
-    testWidgets('multi-column long press starts drag on the touched item',
-        (tester) async {
+    testWidgets('multi-column long press starts drag on the touched item', (
+      tester,
+    ) async {
       final items = List<int>.generate(12, (i) => i);
       int? dragStartIndex;
 
@@ -686,5 +722,239 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
     });
 
+    testWidgets(
+      'multi-column drag down in the same column targets the slot after the hovered item',
+      (tester) async {
+        final items = List<int>.generate(6, (i) => i);
+        int? lastTarget;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SmoothGrid(
+                itemCount: items.length,
+                reorderable: true,
+                reorderConfig: const SmoothReorderConfig(
+                  longPressDelay: Duration(milliseconds: 220),
+                ),
+                delegate: SmoothGridDelegate.count(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  itemExtentBuilder: (_) => 120,
+                ),
+                itemBuilder: (context, index) => SmoothGridTile(
+                  child: Container(
+                    key: ValueKey('grid_down_${items[index]}'),
+                    color: Colors.teal,
+                    alignment: Alignment.center,
+                    child: Text('${items[index]}'),
+                  ),
+                ),
+                onReorderUpdate: (_, newIndex) => lastTarget = newIndex,
+                onReorder: (_, _) {},
+              ),
+            ),
+          ),
+        );
+
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byKey(const ValueKey('grid_down_0'))),
+        );
+        await tester.pump(const Duration(milliseconds: 250));
+        final targetRect = tester.getRect(
+          find.byKey(const ValueKey('grid_down_2')),
+        );
+        await gesture.moveTo(
+          Offset(targetRect.center.dx, targetRect.bottom - 12),
+        );
+        await tester.pump();
+
+        expect(lastTarget, 3);
+
+        await gesture.up();
+        await tester.pump(const Duration(milliseconds: 300));
+      },
+    );
+
+    testWidgets('multi-column drop commits the computed target slot', (
+      tester,
+    ) async {
+      final items = List<int>.generate(6, (i) => i);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              return Scaffold(
+                body: SmoothGrid(
+                  itemCount: items.length,
+                  reorderable: true,
+                  reorderConfig: const SmoothReorderConfig(
+                    longPressDelay: Duration(milliseconds: 220),
+                    translateDuration: Duration(milliseconds: 80),
+                  ),
+                  delegate: SmoothGridDelegate.count(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    itemExtentBuilder: (_) => 120,
+                  ),
+                  itemBuilder: (context, index) => SmoothGridTile(
+                    child: Container(
+                      key: ValueKey('grid_commit_${items[index]}'),
+                      color: Colors.cyan,
+                      alignment: Alignment.center,
+                      child: Text('${items[index]}'),
+                    ),
+                  ),
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      final item = items.removeAt(oldIndex);
+                      items.insert(
+                        newIndex > oldIndex ? newIndex - 1 : newIndex,
+                        item,
+                      );
+                    });
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('grid_commit_0'))),
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      final targetRect = tester.getRect(
+        find.byKey(const ValueKey('grid_commit_2')),
+      );
+      await gesture.moveTo(
+        Offset(targetRect.center.dx, targetRect.bottom - 12),
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(items, [1, 2, 0, 3, 4, 5]);
+    });
+
+    testWidgets(
+      'multi-column drag left in the same row targets the slot before the hovered item',
+      (tester) async {
+        final items = List<int>.generate(6, (i) => i);
+        int? lastTarget;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SmoothGrid(
+                itemCount: items.length,
+                reorderable: true,
+                reorderConfig: const SmoothReorderConfig(
+                  longPressDelay: Duration(milliseconds: 220),
+                ),
+                delegate: SmoothGridDelegate.count(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  itemExtentBuilder: (_) => 120,
+                ),
+                itemBuilder: (context, index) => SmoothGridTile(
+                  child: Container(
+                    key: ValueKey('grid_left_${items[index]}'),
+                    color: Colors.indigo,
+                    alignment: Alignment.center,
+                    child: Text('${items[index]}'),
+                  ),
+                ),
+                onReorderUpdate: (_, newIndex) => lastTarget = newIndex,
+                onReorder: (_, _) {},
+              ),
+            ),
+          ),
+        );
+
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byKey(const ValueKey('grid_left_1'))),
+        );
+        await tester.pump(const Duration(milliseconds: 250));
+        final targetRect = tester.getRect(
+          find.byKey(const ValueKey('grid_left_0')),
+        );
+        await gesture.moveTo(
+          Offset(targetRect.left + 12, targetRect.center.dy),
+        );
+        await tester.pump();
+
+        expect(lastTarget, 0);
+
+        await gesture.up();
+        await tester.pump(const Duration(milliseconds: 300));
+      },
+    );
+
+    testWidgets('dragging over the lower half of the last item moves to end', (
+      tester,
+    ) async {
+      final items = List<int>.generate(5, (i) => i);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              return Scaffold(
+                body: SmoothGrid(
+                  itemCount: items.length,
+                  reorderable: true,
+                  reorderConfig: const SmoothReorderConfig(
+                    longPressDelay: Duration(milliseconds: 220),
+                  ),
+                  delegate: SmoothGridDelegate.count(
+                    crossAxisCount: 1,
+                    mainAxisSpacing: 8,
+                    itemExtentBuilder: (_) => 80,
+                  ),
+                  itemBuilder: (context, index) => SmoothGridTile(
+                    child: Container(
+                      key: ValueKey('tail_item_${items[index]}'),
+                      alignment: Alignment.center,
+                      color: Colors.orange,
+                      child: Text('${items[index]}'),
+                    ),
+                  ),
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      final item = items.removeAt(oldIndex);
+                      items.insert(
+                        newIndex > oldIndex ? newIndex - 1 : newIndex,
+                        item,
+                      );
+                    });
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      final start = tester.getCenter(find.byKey(const ValueKey('tail_item_0')));
+      final gesture = await tester.startGesture(start);
+      await tester.pump(const Duration(milliseconds: 250));
+      final lastRect = tester.getRect(
+        find.byKey(const ValueKey('tail_item_4')),
+      );
+      await gesture.moveTo(
+        Offset(lastRect.center.dx, lastRect.bottom - (lastRect.height * 0.2)),
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(items.indexOf(0), 4);
+    });
   });
 }

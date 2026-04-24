@@ -1,5 +1,4 @@
 import 'package:flutter/gestures.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -11,6 +10,20 @@ import 'smooth_grid_delegate.dart';
 typedef SmoothReorderStartCallback = void Function(int index);
 typedef SmoothReorderUpdateCallback = void Function(int oldIndex, int newIndex);
 typedef SmoothReorderEndCallback = void Function(int oldIndex, int newIndex);
+
+class _MultiColumnTargetSlot {
+  final int targetIndex;
+  final Rect targetRect;
+  final Rect? beforeRect;
+  final Rect? afterRect;
+
+  const _MultiColumnTargetSlot({
+    required this.targetIndex,
+    required this.targetRect,
+    required this.beforeRect,
+    required this.afterRect,
+  });
+}
 
 /// A high-performance staggered/masonry grid view.
 class SmoothGrid extends StatefulWidget {
@@ -67,12 +80,6 @@ class SmoothGrid extends StatefulWidget {
 }
 
 class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
-  static const SpringDescription _previewSpring = SpringDescription(
-    mass: 1,
-    stiffness: 520,
-    damping: 36,
-  );
-
   final GlobalKey _scrollViewKey = GlobalKey();
   final GlobalKey _sliverKey = GlobalKey();
 
@@ -89,6 +96,8 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
 
   Map<int, Offset> _previewFrom = const {};
   Map<int, Offset> _previewTo = const {};
+  Rect? _previewPlaceholderFrom;
+  Rect? _previewPlaceholderTo;
   Rect _ghostRect = Rect.zero;
   Rect _settleFromRect = Rect.zero;
   Rect _settleToRect = Rect.zero;
@@ -100,17 +109,18 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
   int _lastPreviewFirstVisible = -1;
   int _lastPreviewLastVisible = -1;
 
-  ScrollController get _scrollController => widget.controller ?? _ownedController!;
+  ScrollController get _scrollController =>
+      widget.controller ?? _ownedController!;
   SmoothReorderConfig get _reorderConfig =>
       widget.reorderConfig ?? const SmoothReorderConfig();
 
   @override
   void initState() {
     super.initState();
-    _previewController =
-        AnimationController(vsync: this)..addListener(_applyPreviewAnimation);
-    _settleController =
-        AnimationController(vsync: this)..addListener(_updateGhostFromSettle);
+    _previewController = AnimationController(vsync: this)
+      ..addListener(_applyPreviewAnimation);
+    _settleController = AnimationController(vsync: this)
+      ..addListener(_updateGhostFromSettle);
     if (widget.controller == null) {
       _ownedController = ScrollController();
     }
@@ -250,8 +260,8 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final viewportOffset = _scrollController.hasClients
         ? _scrollController.position.pixels
         : 0.0;
-    final pointerLocal = viewportBox.globalToLocal(globalPosition) +
-        Offset(0, viewportOffset);
+    final pointerLocal =
+        viewportBox.globalToLocal(globalPosition) + Offset(0, viewportOffset);
     return renderGrid.getItemIndexAt(pointerLocal);
   }
 
@@ -260,7 +270,9 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
 
     final renderGrid = _renderGrid;
     final viewportBox = _scrollViewBox;
-    if (renderGrid == null || viewportBox == null || index >= widget.itemCount) {
+    if (renderGrid == null ||
+        viewportBox == null ||
+        index >= widget.itemCount) {
       return;
     }
 
@@ -276,21 +288,24 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     );
     final globalTopLeft = viewportBox.localToGlobal(viewportRect.topLeft);
     final globalRect = globalTopLeft & viewportRect.size;
-    final pointerLocal = viewportBox.globalToLocal(globalPosition) +
-        Offset(0, viewportOffset);
+    final pointerLocal =
+        viewportBox.globalToLocal(globalPosition) + Offset(0, viewportOffset);
 
-    _dragEngine = SmoothDragEngine(
-      collisionHysteresis: _reorderConfig.collisionHysteresis,
-    )..startDrag(
-        index: index,
-        dragRect: itemRect,
-        pointerGlobal: globalPosition,
-        pointerLocal: pointerLocal,
-      );
+    _dragEngine =
+        SmoothDragEngine(
+          collisionHysteresis: _reorderConfig.collisionHysteresis,
+        )..startDrag(
+          index: index,
+          dragRect: itemRect,
+          pointerGlobal: globalPosition,
+          pointerLocal: pointerLocal,
+        );
 
     _autoScroller = AutoScroller(
       scrollController: _scrollController,
-      edgeThreshold: _reorderConfig.resolveEdgeScrollZone(viewportBox.size.height),
+      edgeThreshold: _reorderConfig.resolveEdgeScrollZone(
+        viewportBox.size.height,
+      ),
       maxScrollVelocity: _reorderConfig.maxAutoScrollVelocity,
     );
 
@@ -311,10 +326,16 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _ensureGhostOverlay();
     _previewFrom = const {};
     _previewTo = const {};
+    _previewPlaceholderFrom = itemRect;
+    _previewPlaceholderTo = itemRect;
     _lastPreviewTarget = index;
     _lastPreviewFirstVisible = -1;
     _lastPreviewLastVisible = -1;
-    renderGrid.setPreviewState(offsets: const {}, hiddenIndex: -1);
+    renderGrid.setPreviewState(
+      offsets: const {},
+      hiddenIndex: index,
+      placeholderRect: itemRect,
+    );
     widget.onReorderStart?.call(index);
     _startAutoScrollTicker();
   }
@@ -357,7 +378,8 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final localInContent = localInViewport + Offset(0, scrollOffset);
     final dragRect = dragEngine.dragRect;
     final dragTopLeft = localInContent - _dragPointerAnchor;
-    final dragCenter = dragTopLeft + Offset(dragRect.width / 2, dragRect.height / 2);
+    final dragCenter =
+        dragTopLeft + Offset(dragRect.width / 2, dragRect.height / 2);
     dragEngine.updatePointer(
       pointerGlobal: globalPosition,
       pointerLocal: dragCenter,
@@ -376,8 +398,17 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     int targetIndex;
     if (localInContent.dy <= viewportTop) {
       targetIndex = 0;
+      dragEngine.setTargetIndex(targetIndex, maxTargetIndex: widget.itemCount);
     } else if (localInContent.dy >= viewportBottom) {
-      targetIndex = widget.itemCount - 1;
+      targetIndex = widget.itemCount;
+      dragEngine.setTargetIndex(targetIndex, maxTargetIndex: widget.itemCount);
+    } else if (widget.delegate.crossAxisCount > 1) {
+      targetIndex = _computeMultiColumnTargetIndex(
+        renderGrid: renderGrid,
+        dragEngine: dragEngine,
+        candidateIndices: candidates,
+      );
+      dragEngine.setTargetIndex(targetIndex, maxTargetIndex: widget.itemCount);
     } else {
       targetIndex = dragEngine.computeTargetIndex(
         candidateIndices: candidates.isEmpty
@@ -386,7 +417,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
         getItemRect: renderGrid.getItemRect,
         viewportTop: viewportTop - band,
         viewportBottom: viewportBottom + band,
-        maxTargetIndex: widget.itemCount - 1,
+        maxTargetIndex: widget.itemCount,
       );
     }
 
@@ -403,6 +434,179 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _ghostEntry?.markNeedsBuild();
 
     _syncPreviewToTarget();
+  }
+
+  int _computeMultiColumnTargetIndex({
+    required RenderSmoothGrid renderGrid,
+    required SmoothDragEngine dragEngine,
+    required List<int> candidateIndices,
+  }) {
+    final dragRect = dragEngine.dragRect;
+    final candidateTargets = <int>{0, widget.itemCount};
+    final sourceIndices = candidateIndices.isEmpty
+        ? List<int>.generate(widget.itemCount, (index) => index)
+        : candidateIndices;
+    for (final index in sourceIndices) {
+      if (index < 0 || index >= widget.itemCount) continue;
+      candidateTargets.add(index);
+      candidateTargets.add(index + 1);
+    }
+
+    final slots = candidateTargets
+        .map(
+          (target) => _buildMultiColumnTargetSlot(
+            renderGrid: renderGrid,
+            dragIndex: dragEngine.dragIndex,
+            targetIndex: target.clamp(0, widget.itemCount),
+          ),
+        )
+        .whereType<_MultiColumnTargetSlot>()
+        .toList(growable: false);
+    if (slots.isEmpty) {
+      return dragEngine.targetIndex.clamp(0, widget.itemCount);
+    }
+
+    final previousTarget = dragEngine.targetIndex;
+    var bestSlot = slots.first;
+    var bestScore = _scoreMultiColumnTargetSlot(
+      dragRect: dragRect,
+      slot: bestSlot,
+    );
+    for (final slot in slots.skip(1)) {
+      final score = _scoreMultiColumnTargetSlot(dragRect: dragRect, slot: slot);
+      if (score < bestScore) {
+        bestSlot = slot;
+        bestScore = score;
+      }
+    }
+
+    if (previousTarget >= 0) {
+      for (final slot in slots) {
+        if (slot.targetIndex != previousTarget) continue;
+        final previousScore = _scoreMultiColumnTargetSlot(
+          dragRect: dragRect,
+          slot: slot,
+        );
+        if (previousScore <=
+            bestScore + (_reorderConfig.collisionHysteresis * 2.0)) {
+          return previousTarget;
+        }
+        break;
+      }
+    }
+
+    return bestSlot.targetIndex;
+  }
+
+  _MultiColumnTargetSlot? _buildMultiColumnTargetSlot({
+    required RenderSmoothGrid renderGrid,
+    required int dragIndex,
+    required int targetIndex,
+  }) {
+    if (widget.itemCount <= 0 ||
+        dragIndex < 0 ||
+        dragIndex >= widget.itemCount) {
+      return null;
+    }
+
+    final clampedTarget = targetIndex.clamp(0, widget.itemCount);
+    final targetRect =
+        renderGrid.computeReorderTargetRect(
+          dragIndex: dragIndex,
+          targetIndex: clampedTarget,
+        ) ??
+        renderGrid.getItemRect(dragIndex);
+    return _MultiColumnTargetSlot(
+      targetIndex: clampedTarget,
+      targetRect: targetRect,
+      beforeRect: _slotNeighborRect(
+        renderGrid: renderGrid,
+        dragIndex: dragIndex,
+        startIndex: clampedTarget - 1,
+        step: -1,
+      ),
+      afterRect: _slotNeighborRect(
+        renderGrid: renderGrid,
+        dragIndex: dragIndex,
+        startIndex: clampedTarget,
+        step: 1,
+      ),
+    );
+  }
+
+  Rect? _slotNeighborRect({
+    required RenderSmoothGrid renderGrid,
+    required int dragIndex,
+    required int startIndex,
+    required int step,
+  }) {
+    var index = startIndex;
+    while (index >= 0 && index < widget.itemCount) {
+      if (index != dragIndex) {
+        return renderGrid.getItemRect(index);
+      }
+      index += step;
+    }
+    return null;
+  }
+
+  double _scoreMultiColumnTargetSlot({
+    required Rect dragRect,
+    required _MultiColumnTargetSlot slot,
+  }) {
+    final dragCenter = dragRect.center;
+    final containsCenter = slot.targetRect.contains(dragCenter);
+    final targetOverlap = _overlapRatio(dragRect, slot.targetRect);
+
+    final beforeContains = slot.beforeRect?.contains(dragCenter) ?? false;
+    final afterContains = slot.afterRect?.contains(dragCenter) ?? false;
+    final anchorContains = beforeContains || afterContains;
+    final beforeOverlap = slot.beforeRect == null
+        ? 0.0
+        : _overlapRatio(dragRect, slot.beforeRect!);
+    final afterOverlap = slot.afterRect == null
+        ? 0.0
+        : _overlapRatio(dragRect, slot.afterRect!);
+    final anchorOverlap = beforeOverlap > afterOverlap
+        ? beforeOverlap
+        : afterOverlap;
+
+    final targetDistance =
+        (dragCenter.dy - slot.targetRect.center.dy).abs() +
+        ((dragCenter.dx - slot.targetRect.center.dx).abs() * 0.6);
+    final beforeDistance = slot.beforeRect == null
+        ? double.infinity
+        : (dragCenter.dy - slot.beforeRect!.center.dy).abs() +
+              ((dragCenter.dx - slot.beforeRect!.center.dx).abs() * 0.5);
+    final afterDistance = slot.afterRect == null
+        ? double.infinity
+        : (dragCenter.dy - slot.afterRect!.center.dy).abs() +
+              ((dragCenter.dx - slot.afterRect!.center.dx).abs() * 0.5);
+    final anchorDistance = beforeDistance < afterDistance
+        ? beforeDistance
+        : afterDistance;
+
+    return targetDistance +
+        (anchorDistance.isFinite ? anchorDistance * 0.35 : 0.0) -
+        (targetOverlap * 280.0) -
+        (anchorOverlap * 180.0) -
+        (containsCenter ? 1200.0 : 0.0) -
+        (anchorContains ? 220.0 : 0.0);
+  }
+
+  double _overlapRatio(Rect a, Rect b) {
+    if (!a.overlaps(b)) {
+      return 0.0;
+    }
+    final overlap = a.intersect(b);
+    final overlapArea = overlap.width * overlap.height;
+    final aArea = a.width * a.height;
+    final bArea = b.width * b.height;
+    final minArea = aArea < bArea ? aArea : bArea;
+    if (minArea <= 0) {
+      return 0.0;
+    }
+    return overlapArea / minArea;
   }
 
   void _updateAutoScrollActivity(Offset globalPosition) {
@@ -464,20 +668,29 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
 
     final currentVisual = _currentPreviewOffsets(renderGrid.previewOffsets);
     _previewController.stop();
+
+    final currentPlaceholder = _currentPreviewPlaceholder(
+      _previewPlaceholderTo ?? _previewPlaceholderRect(renderGrid, dragEngine),
+    );
+    final nextPlaceholder = _previewPlaceholderRect(renderGrid, dragEngine);
+
     _previewFrom = currentVisual;
     _previewTo = nextOffsets;
+    _previewPlaceholderFrom = currentPlaceholder;
+    _previewPlaceholderTo = nextPlaceholder;
     _lastPreviewTarget = dragEngine.targetIndex;
     _lastPreviewFirstVisible = firstVisible;
     _lastPreviewLastVisible = lastVisible;
     renderGrid.setPreviewState(
       offsets: currentVisual,
-      hiddenIndex: dragEngine.targetIndex == dragEngine.dragIndex
-          ? -1
-          : dragEngine.dragIndex,
+      hiddenIndex: dragEngine.dragIndex,
+      placeholderRect: currentPlaceholder,
     );
     _previewController.value = 0;
-    _previewController.animateWith(
-      SpringSimulation(_previewSpring, 0, 1, 0),
+    _previewController.animateTo(
+      1,
+      duration: _reorderConfig.translateDuration,
+      curve: _reorderConfig.translateCurve,
     );
   }
 
@@ -497,10 +710,39 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final value = _previewController.value.clamp(0.0, 1.0);
     renderGrid.setPreviewState(
       offsets: _lerpOffsetMaps(_previewFrom, _previewTo, value),
-      hiddenIndex: dragEngine.targetIndex == dragEngine.dragIndex
-          ? -1
-          : dragEngine.dragIndex,
+      hiddenIndex: dragEngine.dragIndex,
+      placeholderRect: _lerpRect(
+        _previewPlaceholderFrom,
+        _previewPlaceholderTo,
+        value,
+      ),
     );
+  }
+
+  Rect? _currentPreviewPlaceholder(Rect? fallback) {
+    if (!_previewController.isAnimating) {
+      return fallback;
+    }
+    final value = _previewController.value.clamp(0.0, 1.0);
+    return _lerpRect(_previewPlaceholderFrom, _previewPlaceholderTo, value) ??
+        fallback;
+  }
+
+  Rect? _lerpRect(Rect? from, Rect? to, double t) {
+    if (from == null) return to;
+    if (to == null) return from;
+    return Rect.lerp(from, to, t);
+  }
+
+  Rect? _previewPlaceholderRect(
+    RenderSmoothGrid renderGrid,
+    SmoothDragEngine dragEngine,
+  ) {
+    return renderGrid.computeReorderTargetRect(
+          dragIndex: dragEngine.dragIndex,
+          targetIndex: dragEngine.targetIndex,
+        ) ??
+        renderGrid.getItemRect(dragEngine.dragIndex);
   }
 
   Map<int, Offset> _lerpOffsetMaps(
@@ -582,7 +824,14 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _previewController.stop();
     _autoScrollTicker?.stop();
 
-    final targetRect = renderGrid.getItemRect(dragEngine.targetIndex);
+    final targetRect =
+        renderGrid.computeReorderTargetRect(
+          dragIndex: dragEngine.dragIndex,
+          targetIndex: dragEngine.targetIndex,
+        ) ??
+        renderGrid.getItemRect(
+          dragEngine.targetIndex.clamp(0, widget.itemCount - 1),
+        );
     final scrollOffset = _scrollController.position.pixels;
     final globalTopLeft = viewportBox.localToGlobal(
       Offset(targetRect.left, targetRect.top - scrollOffset),
@@ -596,7 +845,8 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
 
   void _updateGhostFromSettle() {
     final value = _reorderConfig.settleCurve.transform(_settleController.value);
-    _ghostRect = Rect.lerp(_settleFromRect, _settleToRect, value) ?? _settleToRect;
+    _ghostRect =
+        Rect.lerp(_settleFromRect, _settleToRect, value) ?? _settleToRect;
     _ghostEntry?.markNeedsBuild();
   }
 
@@ -626,6 +876,8 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _ghostChild = null;
     _previewFrom = const {};
     _previewTo = const {};
+    _previewPlaceholderFrom = null;
+    _previewPlaceholderTo = null;
     _ghostRect = Rect.zero;
     _dragPointerAnchor = Offset.zero;
     _dropCommitted = false;
