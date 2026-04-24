@@ -500,6 +500,41 @@ void main() {
     });
   });
 
+  group('RenderSmoothGrid reorder preview', () {
+    testWidgets(
+      'large-item bounded preview keeps dragged item height for placeholder',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SizedBox(
+              width: 300,
+              height: 600,
+              child: SmoothGrid(
+                itemCount: 5001,
+                delegate: SmoothGridDelegate.count(
+                  crossAxisCount: 1,
+                  itemExtentBuilder: (index) => index == 0 ? 220 : 80,
+                ),
+                itemBuilder: (context, index) => const SizedBox.expand(),
+              ),
+            ),
+          ),
+        );
+
+        final renderGrid = tester.allRenderObjects
+            .whereType<RenderSmoothGrid>()
+            .single;
+        final targetRect = renderGrid.computeReorderTargetRect(
+          dragIndex: 0,
+          targetIndex: 4,
+        );
+
+        expect(targetRect, isNotNull);
+        expect(targetRect!.height, 220);
+      },
+    );
+  });
+
   group('SmoothGrid reorder', () {
     testWidgets('long press drag reorders with overlay preview', (
       tester,

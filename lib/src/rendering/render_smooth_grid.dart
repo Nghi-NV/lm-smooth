@@ -23,6 +23,9 @@ class _ReorderPreviewResult {
 /// - O(log n) binary search to find visible range via [SpatialIndex]
 /// - `collectGarbage()` aggressively reclaims off-screen children
 class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
+  static const int _kExactReorderPreviewItemLimit = 5000;
+  static const int _kPartialReorderPreviewItemLimit = 12000;
+
   RenderSmoothGrid({
     required super.childManager,
     required MasonryLayoutConfig layoutConfig,
@@ -38,6 +41,7 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   }
 
   final LayoutCache _layoutCache = LayoutCache();
+  final LayoutCacheEntry _layoutEntry = LayoutCache.entry();
   late final SpatialIndex _spatialIndex = SpatialIndex(_layoutCache);
   late final MasonryLayoutEngine _layoutEngine;
 
@@ -114,8 +118,13 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   }
 
   Rect getItemRect(int index) {
-    final r = _layoutCache.getRaw(index);
-    return Rect.fromLTWH(r.x, r.y, r.w, r.h);
+    _layoutCache.readEntry(index, _layoutEntry);
+    return Rect.fromLTWH(
+      _layoutEntry.x,
+      _layoutEntry.y,
+      _layoutEntry.w,
+      _layoutEntry.h,
+    );
   }
 
   int getItemIndexAt(Offset contentOffset) {
@@ -149,6 +158,11 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       _spatialIndex.queryVisibleItems(top, bottom);
 
   Map<int, Offset> get previewOffsets => _previewOffsets;
+
+  bool get _hasPreviewState =>
+      _previewOffsets.isNotEmpty ||
+      _hiddenIndex >= 0 ||
+      _previewPlaceholderRect != null;
 
   Rect? computeReorderTargetRect({
     required int dragIndex,
@@ -184,6 +198,14 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
         targetIndex > _itemCount ||
         dragIndex == targetIndex) {
       return const _ReorderPreviewResult(offsets: {}, dragRect: null);
+    }
+
+    if (_itemCount > _kExactReorderPreviewItemLimit) {
+      return _simulateBoundedReorderPreview(
+        dragIndex: dragIndex,
+        targetIndex: targetIndex,
+        indices: indices,
+      );
     }
 
     final visible = indices.toSet();
@@ -237,6 +259,182 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       offsets: Map<int, Offset>.unmodifiable(offsets),
       dragRect: dragRect,
     );
+  }
+
+  _ReorderPreviewResult _simulateBoundedReorderPreview({
+    required int dragIndex,
+    required int targetIndex,
+    required Iterable<int> indices,
+  }) {
+    final visibleIndices = indices is List<int>
+        ? indices
+        : indices.toList(growable: false);
+    final partialPreview = _simulatePartialReorderPreview(
+      dragIndex: dragIndex,
+      targetIndex: targetIndex,
+      indices: visibleIndices,
+    );
+    if (partialPreview != null) {
+      return partialPreview;
+    }
+
+    final previewIndex = dragIndex < targetIndex
+        ? (targetIndex - 1).clamp(0, _itemCount - 1)
+        : targetIndex.clamp(0, _itemCount - 1);
+    final targetRect = getItemRect(
+      previewIndex == dragIndex ? dragIndex : previewIndex,
+    );
+    final draggedRect = getItemRect(dragIndex);
+    final dragRect = targetRect.topLeft & draggedRect.size;
+
+    final offsets = <int, Offset>{};
+    _fillBoundedPreviewOffsets(
+      offsets: offsets,
+      indices: visibleIndices,
+      dragIndex: dragIndex,
+      targetIndex: targetIndex,
+    );
+
+    return _ReorderPreviewResult(
+      offsets: Map<int, Offset>.unmodifiable(offsets),
+      dragRect: dragRect,
+    );
+  }
+
+  _ReorderPreviewResult? _simulatePartialReorderPreview({
+    required int dragIndex,
+    required int targetIndex,
+    required List<int> indices,
+  }) {
+    var startIndex = dragIndex < targetIndex ? dragIndex : targetIndex;
+    var endIndex = dragIndex < targetIndex ? targetIndex - 1 : dragIndex;
+    if (indices.isNotEmpty) {
+      final firstVisible = indices.first;
+      final lastVisible = indices.last;
+      if (firstVisible < startIndex && firstVisible <= dragIndex) {
+        startIndex = firstVisible;
+      }
+      if (lastVisible > endIndex) {
+        endIndex = lastVisible;
+      }
+    }
+
+    startIndex = startIndex.clamp(0, _itemCount - 1);
+    endIndex = endIndex.clamp(startIndex, _itemCount - 1);
+    if (endIndex - startIndex + 1 > _kPartialReorderPreviewItemLimit) {
+      return null;
+    }
+
+    final columnCount = _layoutConfig.crossAxisCount;
+    final columnXs = List<double>.generate(columnCount, _layoutConfig.columnX);
+    final columnHeights = _columnHeightsBefore(startIndex);
+    final visible = indices.toSet();
+    final offsets = <int, Offset>{};
+    Rect? dragRect;
+
+    void placeItem(int itemIndex) {
+      if (itemIndex < startIndex || itemIndex > endIndex) return;
+
+      var shortestCol = 0;
+      var minHeight = columnHeights[0];
+      for (var c = 1; c < columnCount; c++) {
+        if (columnHeights[c] < minHeight) {
+          minHeight = columnHeights[c];
+          shortestCol = c;
+        }
+      }
+
+      final currentRect = getItemRect(itemIndex);
+      final nextTopLeft = Offset(
+        columnXs[shortestCol],
+        columnHeights[shortestCol],
+      );
+      if (itemIndex == dragIndex) {
+        dragRect = nextTopLeft & currentRect.size;
+      } else if (visible.contains(itemIndex)) {
+        final delta = nextTopLeft - currentRect.topLeft;
+        if (delta != Offset.zero) offsets[itemIndex] = delta;
+      }
+
+      columnHeights[shortestCol] =
+          nextTopLeft.dy + currentRect.height + _layoutConfig.mainAxisSpacing;
+    }
+
+    if (dragIndex < targetIndex) {
+      for (var index = startIndex; index < targetIndex; index++) {
+        if (index == dragIndex) continue;
+        placeItem(index);
+      }
+      placeItem(dragIndex);
+      for (var index = targetIndex; index <= endIndex; index++) {
+        placeItem(index);
+      }
+    } else {
+      for (var index = startIndex; index <= endIndex; index++) {
+        if (index == targetIndex) placeItem(dragIndex);
+        if (index == dragIndex) continue;
+        placeItem(index);
+      }
+    }
+
+    return _ReorderPreviewResult(
+      offsets: Map<int, Offset>.unmodifiable(offsets),
+      dragRect: dragRect,
+    );
+  }
+
+  List<double> _columnHeightsBefore(int index) {
+    final columnCount = _layoutConfig.crossAxisCount;
+    final heights = List<double>.filled(columnCount, _layoutConfig.paddingTop);
+    if (index <= 0) return heights;
+
+    var foundColumns = 0;
+    final found = List<bool>.filled(columnCount, false);
+    for (var itemIndex = index - 1; itemIndex >= 0; itemIndex--) {
+      final rect = getItemRect(itemIndex);
+      final column = _columnForX(rect.left);
+      if (found[column]) continue;
+      heights[column] = rect.bottom + _layoutConfig.mainAxisSpacing;
+      found[column] = true;
+      foundColumns++;
+      if (foundColumns == columnCount) break;
+    }
+
+    return heights;
+  }
+
+  int _columnForX(double x) {
+    final stride = _layoutConfig.columnWidth + _layoutConfig.crossAxisSpacing;
+    if (stride <= 0) return 0;
+    return ((x - _layoutConfig.paddingLeft) / stride).round().clamp(
+      0,
+      _layoutConfig.crossAxisCount - 1,
+    );
+  }
+
+  void _fillBoundedPreviewOffsets({
+    required Map<int, Offset> offsets,
+    required List<int> indices,
+    required int dragIndex,
+    required int targetIndex,
+  }) {
+    if (dragIndex < targetIndex) {
+      for (final index in indices) {
+        if (index <= dragIndex || index >= targetIndex) continue;
+        final from = getItemRect(index);
+        final to = getItemRect(index - 1);
+        final delta = to.topLeft - from.topLeft;
+        if (delta != Offset.zero) offsets[index] = delta;
+      }
+    } else {
+      for (final index in indices) {
+        if (index < targetIndex || index >= dragIndex) continue;
+        final from = getItemRect(index);
+        final to = getItemRect(index + 1);
+        final delta = to.topLeft - from.topLeft;
+        if (delta != Offset.zero) offsets[index] = delta;
+      }
+    }
   }
 
   void setPreviewState({
@@ -314,26 +512,30 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
           }
         }
       } else if (!_isolateInFlight) {
-        // Sync path: compute on main thread
-        _totalScrollExtent = _layoutEngine.computeLayout(
-          itemCount: _itemCount,
-          itemExtentBuilder: _itemExtentBuilder,
-          config: _layoutConfig,
-        );
-        _needsLayoutRecompute = false;
-        _layoutJustRecomputed = true;
-        _lastFirstIndex = -1;
-        _lastLastIndex = -1;
-
-        // Cache heights for future column switches
         if (_itemCount > LayoutIsolateManager.kIsolateThreshold) {
-          _cachedItemHeights = List<double>.generate(
+          final itemHeights = List<double>.generate(
             _itemCount,
             _itemExtentBuilder,
             growable: false,
           );
+          _cachedItemHeights = itemHeights;
           _cachedItemHeightsCount = _itemCount;
+          _totalScrollExtent = _layoutEngine.computeLayout(
+            itemCount: _itemCount,
+            itemExtentBuilder: (i) => itemHeights[i],
+            config: _layoutConfig,
+          );
+        } else {
+          _totalScrollExtent = _layoutEngine.computeLayout(
+            itemCount: _itemCount,
+            itemExtentBuilder: _itemExtentBuilder,
+            config: _layoutConfig,
+          );
         }
+        _needsLayoutRecompute = false;
+        _layoutJustRecomputed = true;
+        _lastFirstIndex = -1;
+        _lastLastIndex = -1;
       }
     }
 
@@ -384,8 +586,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
 
     // ── Step 2: Seed the first child ──
     if (firstChild == null) {
-      final r = _layoutCache.getRaw(firstIndex);
-      if (!addInitialChild(index: firstIndex, layoutOffset: r.y)) {
+      final y = _layoutCache.getY(firstIndex);
+      if (!addInitialChild(index: firstIndex, layoutOffset: y)) {
         geometry = SliverGeometry(
           scrollExtent: _totalScrollExtent,
           paintExtent: 0,
@@ -400,12 +602,12 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     var currentLeadingIndex = indexOf(firstChild!);
     while (currentLeadingIndex > firstIndex) {
       final targetIndex = currentLeadingIndex - 1;
-      final r = _layoutCache.getRaw(targetIndex);
+      _layoutCache.readEntry(targetIndex, _layoutEntry);
       final child = insertAndLayoutLeadingChild(
-        BoxConstraints.tightFor(width: r.w, height: r.h),
+        BoxConstraints.tightFor(width: _layoutEntry.w, height: _layoutEntry.h),
       );
       if (child == null) break;
-      _applyParentDataRaw(child, targetIndex, r.x, r.y);
+      _applyParentDataRaw(child, targetIndex, _layoutEntry.x, _layoutEntry.y);
       currentLeadingIndex = targetIndex;
     }
 
@@ -432,16 +634,16 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
       final nextIndex = trailingIndex + 1;
       if (nextIndex >= _itemCount) break;
 
-      final r = _layoutCache.getRaw(nextIndex);
+      _layoutCache.readEntry(nextIndex, _layoutEntry);
       final child = insertAndLayoutChild(
-        BoxConstraints.tightFor(width: r.w, height: r.h),
+        BoxConstraints.tightFor(width: _layoutEntry.w, height: _layoutEntry.h),
         after: trailingChild,
       );
       if (child == null) {
         childManager.setDidUnderflow(true);
         break;
       }
-      _applyParentDataRaw(child, nextIndex, r.x, r.y);
+      _applyParentDataRaw(child, nextIndex, _layoutEntry.x, _layoutEntry.y);
       trailingChild = child;
       trailingIndex = nextIndex;
     }
@@ -477,12 +679,12 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   /// Layout a child and apply its pre-computed position from cache.
   void _layoutChildAt(RenderBox child, int index) {
     if (index < 0 || index >= _layoutCache.totalItems) return;
-    final r = _layoutCache.getRaw(index);
+    _layoutCache.readEntry(index, _layoutEntry);
     child.layout(
-      BoxConstraints.tightFor(width: r.w, height: r.h),
+      BoxConstraints.tightFor(width: _layoutEntry.w, height: _layoutEntry.h),
       parentUsesSize: true,
     );
-    _applyParentDataRaw(child, index, r.x, r.y);
+    _applyParentDataRaw(child, index, _layoutEntry.x, _layoutEntry.y);
   }
 
   /// Set parent data from raw layout values (zero-allocation).
@@ -525,6 +727,11 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   @override
   void paint(PaintingContext context, Offset offset) {
     if (firstChild == null) return;
+
+    if (!_hasPreviewState) {
+      _paintNormalChildren(context, offset);
+      return;
+    }
 
     var child = firstChild;
     RenderBox? hiddenChild;
@@ -576,12 +783,38 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     }
   }
 
+  void _paintNormalChildren(PaintingContext context, Offset offset) {
+    var child = firstChild;
+    while (child != null) {
+      final data = child.parentData! as SmoothGridParentData;
+      final mainAxisDelta = data.layoutOffset! - constraints.scrollOffset;
+
+      if (mainAxisDelta < constraints.remainingPaintExtent &&
+          mainAxisDelta + child.size.height > 0) {
+        context.paintChild(
+          child,
+          offset + Offset(data.crossAxisOffset, mainAxisDelta),
+        );
+      }
+
+      child = childAfter(child);
+    }
+  }
+
   @override
   bool hitTestChildren(
     SliverHitTestResult result, {
     required double mainAxisPosition,
     required double crossAxisPosition,
   }) {
+    if (!_hasPreviewState) {
+      return _hitTestNormalChildren(
+        result,
+        mainAxisPosition: mainAxisPosition,
+        crossAxisPosition: crossAxisPosition,
+      );
+    }
+
     var child = lastChild;
     while (child != null) {
       final data = child.parentData! as SmoothGridParentData;
@@ -609,9 +842,36 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     return false;
   }
 
+  bool _hitTestNormalChildren(
+    SliverHitTestResult result, {
+    required double mainAxisPosition,
+    required double crossAxisPosition,
+  }) {
+    var child = lastChild;
+    while (child != null) {
+      final data = child.parentData! as SmoothGridParentData;
+      final mainAxisDelta = data.layoutOffset! - constraints.scrollOffset;
+      final childCrossAxis = crossAxisPosition - data.crossAxisOffset;
+
+      if (hitTestBoxChild(
+        BoxHitTestResult.wrap(result),
+        child,
+        mainAxisPosition: mainAxisPosition - mainAxisDelta,
+        crossAxisPosition: childCrossAxis,
+      )) {
+        return true;
+      }
+      child = childBefore(child);
+    }
+    return false;
+  }
+
   @override
   double childMainAxisPosition(RenderBox child) {
     final data = child.parentData! as SmoothGridParentData;
+    if (_previewOffsets.isEmpty) {
+      return data.layoutOffset! - constraints.scrollOffset;
+    }
     final preview = _previewOffsets[indexOf(child)] ?? Offset.zero;
     return data.layoutOffset! - constraints.scrollOffset + preview.dy;
   }
@@ -619,6 +879,9 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   @override
   double childCrossAxisPosition(RenderBox child) {
     final data = child.parentData! as SmoothGridParentData;
+    if (_previewOffsets.isEmpty) {
+      return data.crossAxisOffset;
+    }
     final preview = _previewOffsets[indexOf(child)] ?? Offset.zero;
     return data.crossAxisOffset + preview.dx;
   }

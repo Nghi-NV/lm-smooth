@@ -104,7 +104,9 @@ class _GridDemoPageState extends State<GridDemoPage> {
           ),
         ],
       ),
-      body: _useList ? _buildListView() : _buildSmoothGrid(),
+      body: BackdropGroup(
+        child: _useList ? _buildListView() : _buildSmoothGrid(),
+      ),
       floatingActionButton: FloatingActionButton.small(
         onPressed: () => setState(() {
           _reorderable = !_reorderable;
@@ -124,15 +126,16 @@ class _GridDemoPageState extends State<GridDemoPage> {
       itemCount: _itemCount,
       reorderable: _reorderable,
       addAutomaticKeepAlives: false,
-      findChildIndexCallback: (key) {
-        if (key is ValueKey<int>) {
-          final itemId = key.value;
-          final currentItems = _reorderable ? _items : List<int>.generate(_itemCount, (i) => i);
-          final index = currentItems.indexOf(itemId);
-          return index < 0 ? null : index;
-        }
-        return null;
-      },
+      cacheExtent: 1200,
+      findChildIndexCallback: _reorderable
+          ? (key) {
+              if (key is ValueKey<int>) {
+                final index = _items.indexOf(key.value);
+                return index < 0 ? null : index;
+              }
+              return null;
+            }
+          : null,
       delegate: SmoothGridDelegate.count(
         crossAxisCount: _columns,
         mainAxisSpacing: 6,
@@ -166,6 +169,7 @@ class _GridDemoPageState extends State<GridDemoPage> {
   Widget _buildListView() {
     return ListView.builder(
       itemCount: _itemCount,
+      cacheExtent: 1200,
       itemBuilder: (context, index) {
         return Padding(
           key: ValueKey('list_item_$index'),

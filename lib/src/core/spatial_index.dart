@@ -49,18 +49,15 @@ class SpatialIndex {
       _sortedIdx = Int32List(n);
     }
 
-    // Fill arrays — batch-read directly via getY (already O(1) each)
-    // For masonry layout, items are already nearly sorted by Y,
-    // so the subsequent sort will be ~O(n) with Timsort.
+    // Masonry layout assigns each next item to the current shortest column.
+    // That minimum column height is monotonic, so Y is already sorted by index.
+    // Keep the index identity-mapped to avoid sort scratch allocations.
     for (var i = 0; i < n; i++) {
       _sortedY[i] = _cache.getY(i);
       _sortedIdx[i] = i;
     }
     _length = n;
-
-    // Use a paired sort: sort indices by Y using Timsort (Dart default).
-    // Timsort is O(n) for nearly-sorted data, which masonry layout produces.
-    _timsortByY();
+    assert(_debugAssertMonotonicY());
 
     _isDirty = false;
   }
@@ -85,17 +82,11 @@ class SpatialIndex {
       return;
     }
 
-    // Update only the Y values that changed (fromIndex onward)
-    // We need to find these entries in sorted arrays and update them
-    for (var i = 0; i < _length; i++) {
-      final itemIdx = _sortedIdx[i];
-      if (itemIdx >= fromIndex) {
-        _sortedY[i] = _cache.getY(itemIdx);
-      }
+    for (var i = fromIndex; i < _length; i++) {
+      _sortedY[i] = _cache.getY(i);
+      _sortedIdx[i] = i;
     }
-
-    // Re-sort — Timsort is ~O(n) when only a tail portion is out of order
-    _timsortByY();
+    assert(_debugAssertMonotonicY());
 
     _isDirty = false;
   }
@@ -276,32 +267,16 @@ class SpatialIndex {
     return maxItemIdx;
   }
 
-  /// Sort _sortedY and _sortedIdx together using Dart's Timsort.
-  ///
-  /// Timsort is O(n) for nearly-sorted data, which masonry layout produces
-  /// (items are placed top-to-bottom, so Y values are mostly ascending).
-  /// This replaces the custom quicksort which was O(n log n) always.
-  void _timsortByY() {
-    if (_length <= 1) return;
-
-    // Build a list of indices and sort using Dart's built-in sort (Timsort)
-    final indices = List<int>.generate(_length, (i) => i);
-    indices.sort((a, b) {
-      final cmp = _sortedY[a].compareTo(_sortedY[b]);
-      if (cmp != 0) return cmp;
-      return _sortedIdx[a].compareTo(_sortedIdx[b]);
-    });
-
-    // Apply the permutation to both arrays
-    final newY = Float64List(_length);
-    final newIdx = Int32List(_length);
-    for (var i = 0; i < _length; i++) {
-      newY[i] = _sortedY[indices[i]];
-      newIdx[i] = _sortedIdx[indices[i]];
+  bool _debugAssertMonotonicY() {
+    for (var i = 1; i < _length; i++) {
+      if (_sortedY[i] < _sortedY[i - 1]) {
+        throw StateError(
+          'SpatialIndex requires masonry Y offsets to be monotonic by index. '
+          'Item ${_sortedIdx[i]} has y=${_sortedY[i]} after '
+          'item ${_sortedIdx[i - 1]} with y=${_sortedY[i - 1]}.',
+        );
+      }
     }
-
-    // Copy back
-    _sortedY.setRange(0, _length, newY);
-    _sortedIdx.setRange(0, _length, newIdx);
+    return true;
   }
 }

@@ -12,7 +12,12 @@ import 'spatial_index.dart';
 /// via [Float64List] for minimal copying overhead.
 class LayoutIsolateManager {
   /// Threshold: use Isolate if itemCount exceeds this.
-  static const int kIsolateThreshold = 100000;
+  ///
+  /// Layout computation is intentionally very cheap after the spatial index
+  /// stopped sorting during rebuild. Since item heights still have to be
+  /// materialized on the main isolate before work can be transferred, using an
+  /// isolate too early causes extra allocation and first-scroll jank.
+  static const int kIsolateThreshold = 1000000;
 
   /// Compute layout on an Isolate if [itemCount] > [kIsolateThreshold],
   /// otherwise compute on the main thread.

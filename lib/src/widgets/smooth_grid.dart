@@ -411,9 +411,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
       dragEngine.setTargetIndex(targetIndex, maxTargetIndex: widget.itemCount);
     } else {
       targetIndex = dragEngine.computeTargetIndex(
-        candidateIndices: candidates.isEmpty
-            ? List<int>.generate(widget.itemCount, (i) => i)
-            : candidates,
+        candidateIndices: candidates,
         getItemRect: renderGrid.getItemRect,
         viewportTop: viewportTop - band,
         viewportBottom: viewportBottom + band,
@@ -443,10 +441,10 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
   }) {
     final dragRect = dragEngine.dragRect;
     final candidateTargets = <int>{0, widget.itemCount};
-    final sourceIndices = candidateIndices.isEmpty
-        ? List<int>.generate(widget.itemCount, (index) => index)
-        : candidateIndices;
-    for (final index in sourceIndices) {
+    if (candidateIndices.isEmpty) {
+      return dragEngine.targetIndex.clamp(0, widget.itemCount);
+    }
+    for (final index in candidateIndices) {
       if (index < 0 || index >= widget.itemCount) continue;
       candidateTargets.add(index);
       candidateTargets.add(index + 1);

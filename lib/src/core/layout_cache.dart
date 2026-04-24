@@ -22,6 +22,9 @@ class LayoutCache {
   int _totalItems = 0;
   double _totalHeight = 0;
 
+  /// Reusable mutable holder for zero-allocation full-rect reads.
+  static LayoutCacheEntry entry() => LayoutCacheEntry();
+
   /// Creates a [LayoutCache] with the given [chunkSize].
   /// [chunkSize] must be a power of 2.
   LayoutCache({this.chunkSize = kDefaultChunkSize})
@@ -79,11 +82,48 @@ class LayoutCache {
     );
   }
 
+  /// Reads all layout fields into [entry] without allocating a record or Rect.
+  void readEntry(int index, LayoutCacheEntry entry) {
+    assert(
+      index >= 0 && index < _totalItems,
+      'Index $index out of range [0, $_totalItems)',
+    );
+    final chunkIdx = index >> _chunkShift;
+    final offset = (index & _chunkMask) * _stride;
+    final chunk = _chunks[chunkIdx];
+    entry
+      ..x = chunk[offset]
+      ..y = chunk[offset + 1]
+      ..w = chunk[offset + 2]
+      ..h = chunk[offset + 3];
+  }
+
   /// Returns only the Y offset for item at [index]. O(1).
   double getY(int index) {
     final chunkIdx = index >> _chunkShift;
     final offset = (index & _chunkMask) * _stride;
     return _chunks[chunkIdx][offset + 1];
+  }
+
+  /// Returns only the X offset for item at [index]. O(1).
+  double getX(int index) {
+    final chunkIdx = index >> _chunkShift;
+    final offset = (index & _chunkMask) * _stride;
+    return _chunks[chunkIdx][offset];
+  }
+
+  /// Returns only the width for item at [index]. O(1).
+  double getWidth(int index) {
+    final chunkIdx = index >> _chunkShift;
+    final offset = (index & _chunkMask) * _stride;
+    return _chunks[chunkIdx][offset + 2];
+  }
+
+  /// Returns only the height for item at [index]. O(1).
+  double getHeight(int index) {
+    final chunkIdx = index >> _chunkShift;
+    final offset = (index & _chunkMask) * _stride;
+    return _chunks[chunkIdx][offset + 3];
   }
 
   /// Returns Y + Height (bottom edge) for item at [index]. O(1).
@@ -224,4 +264,12 @@ class LayoutCache {
     }
     return result;
   }
+}
+
+/// Mutable layout entry used for zero-allocation full-rect reads.
+class LayoutCacheEntry {
+  double x = 0;
+  double y = 0;
+  double w = 0;
+  double h = 0;
 }

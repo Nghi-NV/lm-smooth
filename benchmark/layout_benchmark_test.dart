@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart' hide HitTester;
 import 'package:lm_smooth/lm_smooth.dart';
@@ -105,6 +106,38 @@ void main() {
       );
       expect(sw.elapsedMilliseconds, lessThan(100));
       expect(sum, isNot(0));
+    });
+
+    test('readEntry vs getRaw — hot layout access throughput', () {
+      final cache = LayoutCache();
+      for (var i = 0; i < 1000000; i++) {
+        cache.setRect(i, (i % 3) * 110.0, i * 30.0, 100, 80 + (i % 5) * 20.0);
+      }
+
+      final rawSw = Stopwatch()..start();
+      double rawSum = 0;
+      for (var i = 0; i < 1000000; i++) {
+        final r = cache.getRaw(i);
+        rawSum += r.x + r.y + r.w + r.h;
+      }
+      rawSw.stop();
+
+      final entry = LayoutCache.entry();
+      final entrySw = Stopwatch()..start();
+      double entrySum = 0;
+      for (var i = 0; i < 1000000; i++) {
+        cache.readEntry(i, entry);
+        entrySum += entry.x + entry.y + entry.w + entry.h;
+      }
+      entrySw.stop();
+
+      // ignore: avoid_print
+      print(
+        'LayoutCache 1M full reads: getRaw=${rawSw.elapsedMilliseconds}ms | '
+        'readEntry=${entrySw.elapsedMilliseconds}ms',
+      );
+      expect(entrySum, rawSum);
+      expect(entrySw.elapsedMilliseconds, lessThan(200));
     });
 
     test('flat list export/import roundtrip 1M items', () {
@@ -271,6 +304,53 @@ void main() {
         config: config,
       );
       totalHeight = cache.totalHeight;
+    });
+
+    test('rebuild 100K and 1M items without sort scratch allocations', () {
+      LayoutCache buildCache(int count) {
+        final cache = LayoutCache();
+        final spatialIndex = SpatialIndex(cache);
+        final engine = MasonryLayoutEngine(
+          cache: cache,
+          spatialIndex: spatialIndex,
+        );
+        final random = math.Random(42);
+        final heights = List.generate(
+          count,
+          (i) => 80 + random.nextDouble() * 200,
+        );
+        engine.computeLayout(
+          itemCount: count,
+          itemExtentBuilder: (i) => heights[i],
+          config: MasonryLayoutConfig(
+            crossAxisCount: 3,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            viewportWidth: 400,
+          ),
+        );
+        return cache;
+      }
+
+      final cache100k = buildCache(100000);
+      final index100k = SpatialIndex(cache100k);
+      final sw100k = Stopwatch()..start();
+      index100k.rebuild();
+      sw100k.stop();
+
+      final cache1m = buildCache(1000000);
+      final index1m = SpatialIndex(cache1m);
+      final sw1m = Stopwatch()..start();
+      index1m.rebuild();
+      sw1m.stop();
+
+      // ignore: avoid_print
+      print(
+        'SpatialIndex rebuild: 100K=${sw100k.elapsedMilliseconds}ms | '
+        '1M=${sw1m.elapsedMilliseconds}ms',
+      );
+      expect(sw100k.elapsedMilliseconds, lessThan(100));
+      expect(sw1m.elapsedMilliseconds, lessThan(500));
     });
 
     test('queryRange: 1000 random queries on 1M items — avg < 100μs', () {
@@ -468,6 +548,42 @@ void main() {
         reason: 'Avg frame query time should be < 1ms (we have 16ms budget)',
       );
     });
+  });
+
+  group('SmoothGrid Widget Benchmark', () {
+    testWidgets(
+      'large first layout with useIsolate false calls itemExtentBuilder once per item',
+      (tester) async {
+        var heightCalls = 0;
+        const itemCount = 100001;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SizedBox(
+              width: 400,
+              height: 800,
+              child: SmoothGrid(
+                itemCount: itemCount,
+                useIsolate: false,
+                addAutomaticKeepAlives: false,
+                delegate: SmoothGridDelegate.count(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  itemExtentBuilder: (index) {
+                    heightCalls++;
+                    return 80 + (index % 5) * 20.0;
+                  },
+                ),
+                itemBuilder: (context, index) => const SizedBox.expand(),
+              ),
+            ),
+          ),
+        );
+
+        expect(heightCalls, itemCount);
+      },
+    );
   });
 
   // ============================================================
