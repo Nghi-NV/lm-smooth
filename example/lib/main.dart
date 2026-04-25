@@ -1,7 +1,11 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
-import 'package:lm_smooth/lm_smooth.dart';
+
+import 'demo_common.dart';
+import 'grid_demo_page.dart';
+import 'horizontal_demo_page.dart';
+import 'sectioned_grid_demo_page.dart';
+import 'smooth_list_demo_page.dart';
+import 'smooth_table_demo_page.dart';
 
 void main() {
   runApp(const SmoothGridExampleApp());
@@ -22,336 +26,159 @@ class SmoothGridExampleApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const GridDemoPage(itemCount: 1000),
+      home: const ExampleHomePage(),
     );
   }
 }
 
-// ==================================================
-// Grid Demo Page
-// ==================================================
-
-/// Deterministic hash → height 80-280px. Zero allocation, pure function.
-double _heightForIndex(int index) {
-  final h = ((index * 2654435761) & 0xFFFFFFFF) % 200;
-  return 80.0 + h;
-}
-
-class GridDemoPage extends StatefulWidget {
-  final int itemCount;
-
-  const GridDemoPage({super.key, required this.itemCount});
-
-  @override
-  State<GridDemoPage> createState() => _GridDemoPageState();
-}
-
-class _GridDemoPageState extends State<GridDemoPage> {
-  late int _itemCount = widget.itemCount;
-  int _columns = 3;
-  bool _reorderable = false;
-  bool _useList = false; // A/B comparison: Grid vs ListView
-
-  // Only used in reorderable mode — lazily initialized
-  List<int>? _reorderItems;
-
-  List<int> get _items => _reorderItems ??= List.generate(_itemCount, (i) => i);
-
-  void _updateItemCount(int count) {
-    setState(() {
-      _itemCount = count;
-      _reorderItems = _reorderable ? List.generate(count, (i) => i) : null;
-    });
-  }
+class ExampleHomePage extends StatelessWidget {
+  const ExampleHomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text(
-          '${_fmt(_itemCount)} · ${_useList ? "List" : "$_columns col"}${_reorderable ? ' · Drag' : ''}',
-          style: const TextStyle(fontSize: 14),
-        ),
-        actions: [
-          // Grid/List toggle
-          IconButton(
-            icon: Icon(_useList ? Icons.view_list : Icons.grid_view),
-            onPressed: () => setState(() => _useList = !_useList),
-            tooltip: _useList ? 'Switch to Grid' : 'Switch to List',
-          ),
-          // Column controls (only for grid mode)
-          if (!_useList) ...[
-            IconButton(
-              icon: const Icon(Icons.remove),
-              onPressed: _columns > 1 ? () => setState(() => _columns--) : null,
-              tooltip: 'Less columns',
-            ),
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: _columns < 6 ? () => setState(() => _columns++) : null,
-              tooltip: 'More columns',
-            ),
-          ],
-          // Item count menu
-          PopupMenuButton<int>(
-            icon: const Icon(Icons.format_list_numbered),
-            tooltip: 'Item count',
-            onSelected: _updateItemCount,
-            itemBuilder: (_) => [
-              for (final n in [100, 500, 1000, 5000, 10000, 100000, 1000000])
-                PopupMenuItem(value: n, child: Text('${_fmt(n)} items')),
+        title: const Text('lm_smooth showcases'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: DemoGradientBackdrop(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+            children: [
+              const DemoHeroHeader(
+                title: 'Virtual Views Toolkit',
+                subtitle:
+                    'Heavy polished demos for grid, sessions, horizontal list and table.',
+                icon: Icons.auto_awesome,
+              ),
+              _DemoTile(
+                title: 'SmoothGrid stress demo',
+                subtitle: 'Masonry, 1K–1M items, reorder, blur-heavy cards',
+                icon: Icons.grid_view,
+                accent: const Color(0xFF7C4DFF),
+                builder: (_) => const GridDemoPage(itemCount: 1000),
+              ),
+              _DemoTile(
+                title: 'Pinned session grid',
+                subtitle:
+                    'One active sticky session header inside a rich masonry feed',
+                icon: Icons.view_agenda,
+                accent: const Color(0xFF00BFA5),
+                builder: (_) => const SectionedGridDemoPage(),
+              ),
+              _DemoTile(
+                title: 'Horizontal showcase',
+                subtitle:
+                    'Horizontal SmoothList virtualization with premium cards',
+                icon: Icons.swap_horiz,
+                accent: const Color(0xFFFFB300),
+                builder: (_) => const HorizontalDemoPage(),
+              ),
+              _DemoTile(
+                title: 'SmoothList feed',
+                subtitle:
+                    'Variable row extents with frosted glass timeline cards',
+                icon: Icons.view_list,
+                accent: const Color(0xFF40C4FF),
+                builder: (_) => const SmoothListDemoPage(),
+              ),
+              _DemoTile(
+                title: 'SmoothTable analytics',
+                subtitle: 'Pinned rows/columns with styled financial cells',
+                icon: Icons.table_chart,
+                accent: const Color(0xFFFF5252),
+                builder: (_) => const SmoothTableDemoPage(),
+              ),
             ],
           ),
-        ],
-      ),
-      body: BackdropGroup(
-        child: _useList ? _buildListView() : _buildSmoothGrid(),
-      ),
-      floatingActionButton: FloatingActionButton.small(
-        onPressed: () => setState(() {
-          _reorderable = !_reorderable;
-          _reorderItems = _reorderable
-              ? List.generate(_itemCount, (i) => i)
-              : null;
-        }),
-        tooltip: _reorderable ? 'Disable drag' : 'Enable drag',
-        child: Icon(_reorderable ? Icons.lock_open : Icons.drag_indicator),
+        ),
       ),
     );
-  }
-
-  /// SmoothGrid mode
-  Widget _buildSmoothGrid() {
-    return SmoothGrid(
-      itemCount: _itemCount,
-      reorderable: _reorderable,
-      addAutomaticKeepAlives: false,
-      cacheExtent: 1200,
-      findChildIndexCallback: _reorderable
-          ? (key) {
-              if (key is ValueKey<int>) {
-                final index = _items.indexOf(key.value);
-                return index < 0 ? null : index;
-              }
-              return null;
-            }
-          : null,
-      delegate: SmoothGridDelegate.count(
-        crossAxisCount: _columns,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-        padding: const EdgeInsets.all(6),
-        itemExtentBuilder: _reorderable
-            ? (index) => _heightForIndex(_items[index])
-            : (index) => _heightForIndex(index),
-      ),
-      itemBuilder: (context, index) {
-        final itemIndex = _reorderable ? _items[index] : index;
-        return SmoothGridTile(
-          key: ValueKey(itemIndex),
-          child: _ItemCard(index: itemIndex),
-        );
-      },
-      onReorder: _reorderable
-          ? (oldIndex, newIndex) {
-              setState(() {
-                final item = _items.removeAt(oldIndex);
-                final insertAt = newIndex > oldIndex ? newIndex - 1 : newIndex;
-                _items.insert(insertAt, item);
-              });
-            }
-          : null,
-      onTap: _reorderable ? null : (index) => _showSnack(context, index),
-    );
-  }
-
-  /// ListView baseline — same _ItemCard widgets for A/B comparison
-  Widget _buildListView() {
-    return ListView.builder(
-      itemCount: _itemCount,
-      cacheExtent: 1200,
-      itemBuilder: (context, index) {
-        return Padding(
-          key: ValueKey('list_item_$index'),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-          child: SizedBox(
-            height: _heightForIndex(index),
-            child: _ItemCard(index: index),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showSnack(BuildContext context, int index) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Tapped #$index'),
-        duration: const Duration(milliseconds: 400),
-      ),
-    );
-  }
-
-  String _fmt(int n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(0)}M';
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}K';
-    return '$n';
   }
 }
 
-// ==================================================
-// Rich Item Card — Zero-allocation design
-// ==================================================
+class _DemoTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accent;
+  final WidgetBuilder builder;
 
-const _categories = [
-  'Nature',
-  'Travel',
-  'Food',
-  'Art',
-  'Music',
-  'Tech',
-  'Sport',
-  'Fashion',
-  'Photo',
-  'Design',
-];
-
-const _icons = [
-  Icons.park,
-  Icons.flight,
-  Icons.restaurant,
-  Icons.palette,
-  Icons.music_note,
-  Icons.computer,
-  Icons.sports_soccer,
-  Icons.checkroom,
-  Icons.camera_alt,
-  Icons.brush,
-];
-
-// Pre-computed static colors — avoid per-frame allocation
-const _iconColor = Color(0x33FFFFFF); // white 0.2 alpha
-const _chipBgColor = Color(0x44000000); // black26
-const _chipTextStyle = TextStyle(
-  color: Color(0xB3FFFFFF), // white70
-  fontSize: 10,
-  fontWeight: FontWeight.w500,
-);
-const _titleTextStyle = TextStyle(
-  color: Colors.white,
-  fontSize: 12,
-  fontWeight: FontWeight.w600,
-);
-const _subtitleColor = Color(0x99FFFFFF); // white 0.6
-const _heartColor = Color(0xCCFF5252); // redAccent 0.8
-const _likesColor = Color(0xB3FFFFFF); // white 0.7
-
-class _ItemCard extends StatelessWidget {
-  final int index;
-
-  const _ItemCard({required this.index});
+  const _DemoTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accent,
+    required this.builder,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final hash = ((index * 2654435761) & 0xFFFFFFFF);
-    final hue = (hash % 360).toDouble();
-    final catIdx = hash % _categories.length;
-    final likes = 10 + (hash % 990);
-
-    // Two-tone gradient — HSLColor allocation here is unavoidable
-    // but these are only computed once per item build, not per frame
-    final baseColor = HSLColor.fromAHSL(1, hue, 0.6, 0.35).toColor();
-    final accentColor = HSLColor.fromAHSL(
-      1,
-      (hue + 40) % 360,
-      0.7,
-      0.25,
-    ).toColor();
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [baseColor, accentColor],
-        ),
-      ),
-      child: Stack(
-        children: [
-          // Center icon
-          Center(child: Icon(_icons[catIdx], size: 36, color: _iconColor)),
-
-          // Top-right category chip
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () =>
+                Navigator.of(context).push(MaterialPageRoute(builder: builder)),
+            child: Ink(
               decoration: BoxDecoration(
-                color: _chipBgColor,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: const Color(0x22FFFFFF)),
+                gradient: LinearGradient(
+                  colors: [
+                    accent.withValues(alpha: 0.42),
+                    const Color(0x1FFFFFFF),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
               ),
-              child: Text(_categories[catIdx], style: _chipTextStyle),
-            ),
-          ),
-
-          // Bottom frosted glass bar — GPU stress test with BackdropFilter
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(12),
-              ),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  color: const Color(0x4D000000),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Item #$index',
-                              style: _titleTextStyle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              '${_categories[catIdx]} collection',
-                              style: const TextStyle(
-                                color: _subtitleColor,
-                                fontSize: 10,
-                              ),
-                            ),
-                          ],
-                        ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: const Color(0x22FFFFFF),
+                        borderRadius: BorderRadius.circular(18),
                       ),
-                      const Icon(Icons.favorite, size: 14, color: _heartColor),
-                      const SizedBox(width: 3),
-                      Text(
-                        '$likes',
-                        style: const TextStyle(
-                          color: _likesColor,
-                          fontSize: 11,
-                        ),
+                      child: Icon(icon, color: Colors.white, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(color: Color(0xB3FFFFFF)),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
                 ),
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }

@@ -4,12 +4,32 @@ import 'package:flutter/widgets.dart';
 
 import '../interaction/auto_scroller.dart';
 import '../interaction/drag_engine.dart';
+import '../core/smooth_session.dart';
 import '../rendering/render_smooth_grid.dart';
 import 'smooth_grid_delegate.dart';
 
 typedef SmoothReorderStartCallback = void Function(int index);
 typedef SmoothReorderUpdateCallback = void Function(int oldIndex, int newIndex);
 typedef SmoothReorderEndCallback = void Function(int oldIndex, int newIndex);
+typedef SmoothSectionHeaderBuilder =
+    Widget Function(BuildContext context, int sectionIndex);
+typedef SmoothSectionItemBuilder =
+    Widget Function(BuildContext context, int sectionIndex, int itemIndex);
+typedef SmoothSectionItemExtentBuilder =
+    double Function(int sectionIndex, int itemIndex);
+
+/// Describes one logical section in a [SmoothSectionedGrid].
+class SmoothGridSection {
+  final String id;
+  final int itemCount;
+  final Object? data;
+
+  const SmoothGridSection({
+    required this.id,
+    required this.itemCount,
+    this.data,
+  });
+}
 
 class _MultiColumnTargetSlot {
   final int targetIndex;
@@ -47,6 +67,7 @@ class SmoothGrid extends StatefulWidget {
   final Axis scrollDirection;
   final bool shrinkWrap;
   final bool? useIsolate;
+  final SmoothSessionController? sessionController;
 
   const SmoothGrid({
     super.key,
@@ -70,6 +91,7 @@ class SmoothGrid extends StatefulWidget {
     this.scrollDirection = Axis.vertical,
     this.shrinkWrap = false,
     this.useIsolate,
+    this.sessionController,
   }) : assert(
          !reorderable || onReorder != null,
          'onReorder must be provided when reorderable is true',
@@ -77,6 +99,272 @@ class SmoothGrid extends StatefulWidget {
 
   @override
   State<SmoothGrid> createState() => _SmoothGridState();
+}
+
+/// A SmoothGrid-like view that renders multiple item sections with headers in
+/// the same scrollable viewport.
+///
+/// This is intended for grouped feeds such as sessions, days, folders, or
+/// categories where each group should keep masonry layout performance but also
+/// expose an in-scroll header. Reorder is intentionally not supported here yet
+/// because cross-section drag semantics need a separate interaction contract.
+class SmoothSectionedGrid extends StatefulWidget {
+  final List<SmoothGridSection> sections;
+  final SmoothSectionHeaderBuilder headerBuilder;
+  final SmoothSectionItemBuilder itemBuilder;
+  final SmoothSectionItemExtentBuilder itemExtentBuilder;
+  final int crossAxisCount;
+  final double mainAxisSpacing;
+  final double crossAxisSpacing;
+  final EdgeInsets padding;
+  final ScrollController? controller;
+  final ScrollPhysics? physics;
+  final bool addRepaintBoundaries;
+  final bool addAutomaticKeepAlives;
+  final double? cacheExtent;
+  final bool shrinkWrap;
+  final bool? useIsolate;
+  final SmoothSessionController? sessionController;
+  final bool pinnedHeaders;
+  final double pinnedHeaderExtent;
+
+  const SmoothSectionedGrid({
+    super.key,
+    required this.sections,
+    required this.headerBuilder,
+    required this.itemBuilder,
+    required this.itemExtentBuilder,
+    this.crossAxisCount = 2,
+    this.mainAxisSpacing = 6,
+    this.crossAxisSpacing = 6,
+    this.padding = EdgeInsets.zero,
+    this.controller,
+    this.physics,
+    this.addRepaintBoundaries = true,
+    this.addAutomaticKeepAlives = false,
+    this.cacheExtent,
+    this.shrinkWrap = false,
+    this.useIsolate,
+    this.sessionController,
+    this.pinnedHeaders = false,
+    this.pinnedHeaderExtent = 96,
+  }) : assert(crossAxisCount > 0),
+       assert(pinnedHeaderExtent > 0);
+
+  @override
+  State<SmoothSectionedGrid> createState() => _SmoothSectionedGridState();
+}
+
+class _SmoothSectionedGridState extends State<SmoothSectionedGrid> {
+  ScrollController? _ownedController;
+  var _activePinnedSectionIndex = 0;
+  var _sectionOffsetsDirty = true;
+  List<double> _sectionStarts = const [];
+
+  ScrollController get _scrollController =>
+      widget.controller ?? _ownedController!;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.controller == null) {
+      _ownedController = ScrollController(
+        initialScrollOffset: widget.sessionController?.scrollOffset ?? 0,
+      );
+    }
+    _scrollController.addListener(_handleScroll);
+    _attachSessionController();
+  }
+
+  @override
+  void didUpdateWidget(covariant SmoothSectionedGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?.removeListener(_handleScroll);
+      _ownedController?.removeListener(_handleScroll);
+      oldWidget.sessionController?.detachScrollController();
+      _ownedController?.dispose();
+      _ownedController = widget.controller == null
+          ? ScrollController(
+              initialScrollOffset: widget.sessionController?.scrollOffset ?? 0,
+            )
+          : null;
+      _scrollController.addListener(_handleScroll);
+      _attachSessionController();
+    } else if (oldWidget.sessionController != widget.sessionController) {
+      oldWidget.sessionController?.detachScrollController();
+      _attachSessionController();
+    }
+    _sectionOffsetsDirty = true;
+    if (_activePinnedSectionIndex >= widget.sections.length) {
+      _activePinnedSectionIndex = widget.sections.isEmpty
+          ? 0
+          : widget.sections.length - 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_handleScroll);
+    widget.sessionController?.detachScrollController();
+    _ownedController?.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!widget.pinnedHeaders || widget.sections.isEmpty) return;
+    final nextIndex = _sectionIndexForOffset(_scrollController.offset);
+    if (nextIndex == _activePinnedSectionIndex) return;
+    setState(() => _activePinnedSectionIndex = nextIndex);
+  }
+
+  void _attachSessionController() {
+    final sessionController = widget.sessionController;
+    if (sessionController == null) return;
+    sessionController.attachScrollController(_scrollController);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      sessionController.jumpToSavedOffset();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scrollView = CustomScrollView(
+      controller: _scrollController,
+      physics: widget.physics,
+      shrinkWrap: widget.shrinkWrap,
+      cacheExtent: widget.cacheExtent,
+      slivers: [
+        for (
+          var sectionIndex = 0;
+          sectionIndex < widget.sections.length;
+          sectionIndex++
+        )
+          ..._buildSection(sectionIndex),
+      ],
+    );
+
+    if (!widget.pinnedHeaders || widget.sections.isEmpty) {
+      return scrollView;
+    }
+
+    return Stack(
+      children: [
+        scrollView,
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SizedBox(
+            height: widget.pinnedHeaderExtent,
+            child: widget.headerBuilder(context, _activePinnedSectionIndex),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildSection(int sectionIndex) {
+    final section = widget.sections[sectionIndex];
+    final delegate = SmoothGridDelegate.count(
+      crossAxisCount: widget.crossAxisCount,
+      mainAxisSpacing: widget.mainAxisSpacing,
+      crossAxisSpacing: widget.crossAxisSpacing,
+      padding: widget.padding,
+      itemExtentBuilder: (itemIndex) =>
+          widget.itemExtentBuilder(sectionIndex, itemIndex),
+    );
+
+    return [
+      SliverToBoxAdapter(
+        child: widget.pinnedHeaders
+            ? SizedBox(
+                height: widget.pinnedHeaderExtent,
+                child: sectionIndex == _activePinnedSectionIndex
+                    ? const SizedBox.shrink()
+                    : widget.headerBuilder(context, sectionIndex),
+              )
+            : widget.headerBuilder(context, sectionIndex),
+      ),
+      _SmoothGridSliver(
+        key: ValueKey('smooth_section_${section.id}'),
+        itemCount: section.itemCount,
+        itemBuilder: (context, itemIndex) =>
+            widget.itemBuilder(context, sectionIndex, itemIndex),
+        gridDelegate: delegate,
+        addRepaintBoundaries: widget.addRepaintBoundaries,
+        addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
+        useIsolate: widget.useIsolate,
+      ),
+    ];
+  }
+
+  int _sectionIndexForOffset(double offset) {
+    _ensureSectionOffsets();
+    for (
+      var sectionIndex = _sectionStarts.length - 1;
+      sectionIndex >= 0;
+      sectionIndex--
+    ) {
+      if (offset >= _sectionStarts[sectionIndex]) {
+        return sectionIndex;
+      }
+    }
+    return 0;
+  }
+
+  void _ensureSectionOffsets() {
+    if (!_sectionOffsetsDirty) return;
+
+    final starts = <double>[];
+    var sectionStart = 0.0;
+    for (
+      var sectionIndex = 0;
+      sectionIndex < widget.sections.length;
+      sectionIndex++
+    ) {
+      starts.add(sectionStart);
+      final section = widget.sections[sectionIndex];
+      sectionStart +=
+          widget.pinnedHeaderExtent +
+          _estimateGridHeight(sectionIndex, section.itemCount);
+    }
+    _sectionStarts = starts;
+    _sectionOffsetsDirty = false;
+  }
+
+  double _estimateGridHeight(int sectionIndex, int itemCount) {
+    if (itemCount == 0) return 0;
+
+    final columnHeights = List<double>.filled(
+      widget.crossAxisCount,
+      widget.padding.top,
+    );
+    for (var itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+      var shortestColumn = 0;
+      var minHeight = columnHeights[0];
+      for (var column = 1; column < widget.crossAxisCount; column++) {
+        if (columnHeights[column] < minHeight) {
+          minHeight = columnHeights[column];
+          shortestColumn = column;
+        }
+      }
+      columnHeights[shortestColumn] =
+          minHeight +
+          widget.itemExtentBuilder(sectionIndex, itemIndex) +
+          widget.mainAxisSpacing;
+    }
+
+    var maxHeight = 0.0;
+    for (final columnHeight in columnHeights) {
+      final height = columnHeight > widget.padding.top
+          ? columnHeight - widget.mainAxisSpacing
+          : columnHeight;
+      if (height > maxHeight) maxHeight = height;
+    }
+    return maxHeight + widget.padding.bottom;
+  }
 }
 
 class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
@@ -122,16 +410,28 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _settleController = AnimationController(vsync: this)
       ..addListener(_updateGhostFromSettle);
     if (widget.controller == null) {
-      _ownedController = ScrollController();
+      _ownedController = ScrollController(
+        initialScrollOffset: widget.sessionController?.scrollOffset ?? 0,
+      );
     }
+    _attachSessionController();
   }
 
   @override
   void didUpdateWidget(covariant SmoothGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
+      oldWidget.sessionController?.detachScrollController();
       _ownedController?.dispose();
-      _ownedController = widget.controller == null ? ScrollController() : null;
+      _ownedController = widget.controller == null
+          ? ScrollController(
+              initialScrollOffset: widget.sessionController?.scrollOffset ?? 0,
+            )
+          : null;
+      _attachSessionController();
+    } else if (oldWidget.sessionController != widget.sessionController) {
+      oldWidget.sessionController?.detachScrollController();
+      _attachSessionController();
     }
 
     if (!widget.reorderable && _dragEngine != null) {
@@ -145,8 +445,19 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _autoScrollTicker?.dispose();
     _previewController.dispose();
     _settleController.dispose();
+    widget.sessionController?.detachScrollController();
     _ownedController?.dispose();
     super.dispose();
+  }
+
+  void _attachSessionController() {
+    final sessionController = widget.sessionController;
+    if (sessionController == null) return;
+    sessionController.attachScrollController(_scrollController);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      sessionController.jumpToSavedOffset();
+    });
   }
 
   @override

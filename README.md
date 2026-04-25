@@ -14,6 +14,9 @@ High-performance staggered/masonry grid for Flutter, built for large datasets an
 - Spatial index for fast visible-range queries
 - Optional isolate offload for very large datasets
 - Reorder support with long-press drag, preview translation, and edge auto-scroll
+- Optional view sessions for restoring scroll/selection/reorder draft state
+- Sectioned masonry grids with multiple in-scroll session headers
+- Experimental `SmoothList` and `SmoothTable` virtualized views
 - Works well for feeds, galleries, boards, and uneven card layouts
 
 ## When To Use
@@ -168,6 +171,29 @@ Important parameters:
 - `onLongPress`: optional long-press callback when reorder is disabled
 - `cacheExtent`: overscan area
 - `useIsolate`: force or disable isolate layout computation
+- `sessionController`: optional `SmoothSessionController` for view-state restore
+
+### `SmoothSectionedGrid`
+
+SmoothGrid-like masonry layout for grouped feeds where each session/category/day
+needs its own header inside the same scrollable viewport.
+
+Important parameters:
+
+- `sections`: ordered list of `SmoothGridSection` groups
+- `headerBuilder`: builds each in-scroll section header
+- `itemBuilder`: builds visible items for a specific section
+- `itemExtentBuilder`: returns each section item's known height
+- `crossAxisCount`, spacing, and `padding`: shared masonry layout settings
+- `pinnedHeaders` and `pinnedHeaderExtent`: keep the active session header sticky while scrolling
+
+### `SmoothList`
+
+Known-extent virtualized list with optional session restore and one-column reorder.
+
+### `SmoothTable`
+
+Early 2D virtualized table API for large row/column datasets. Rows are virtualized vertically and cells are culled horizontally.
 
 ### `SmoothGridDelegate.count`
 
@@ -218,7 +244,17 @@ A runnable example is included in [`example/lib/main.dart`](./example/lib/main.d
 - grid/list comparison
 - column switching
 - reorder mode
+- multiple session headers inside one scroll
+- horizontal `SmoothList` virtualization
 - varied card heights
+
+Example screens are split into focused files:
+
+- [`grid_demo_page.dart`](./example/lib/grid_demo_page.dart): SmoothGrid stress, reorder, sessions
+- [`sectioned_grid_demo_page.dart`](./example/lib/sectioned_grid_demo_page.dart): pinned session headers in one scroll
+- [`horizontal_demo_page.dart`](./example/lib/horizontal_demo_page.dart): horizontal SmoothList
+- [`smooth_list_demo_page.dart`](./example/lib/smooth_list_demo_page.dart): vertical SmoothList
+- [`smooth_table_demo_page.dart`](./example/lib/smooth_table_demo_page.dart): pinned SmoothTable
 
 Run it with:
 

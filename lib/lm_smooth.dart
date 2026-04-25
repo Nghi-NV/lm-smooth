@@ -33,6 +33,8 @@ export 'src/core/masonry_layout_engine.dart'
     show MasonryLayoutEngine, MasonryLayoutConfig, SmoothItemExtentBuilder;
 export 'src/core/spatial_index.dart';
 export 'src/core/layout_isolate.dart';
+export 'src/core/smooth_geometry.dart';
+export 'src/core/smooth_session.dart';
 
 // Rendering
 export 'src/rendering/render_smooth_grid.dart';
@@ -42,6 +44,8 @@ export 'src/rendering/smooth_sliver_grid_delegate.dart';
 // Widgets
 export 'src/widgets/smooth_grid.dart';
 export 'src/widgets/smooth_grid_delegate.dart';
+export 'src/widgets/smooth_list.dart';
+export 'src/widgets/smooth_table.dart';
 export 'src/widgets/smooth_grid_tile.dart';
 
 // Interaction

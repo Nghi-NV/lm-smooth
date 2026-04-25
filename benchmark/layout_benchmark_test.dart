@@ -687,8 +687,70 @@ void main() {
     });
   });
 
+  group('Virtual Views Benchmark', () {
+    test('session save/restore 10K cycles — should be cheap', () {
+      final controller = SmoothSessionController(id: 'bench');
+      final sw = Stopwatch()..start();
+      for (var i = 0; i < 10000; i++) {
+        final session = controller.save(scrollOffset: i.toDouble());
+        controller.restore(session);
+      }
+      sw.stop();
+
+      // ignore: avoid_print
+      print('Session save/restore 10K: ${sw.elapsedMilliseconds}ms');
+      expect(sw.elapsedMilliseconds, lessThan(200));
+    });
+
+    testWidgets('SmoothList initial build with 10K items stays bounded', (
+      tester,
+    ) async {
+      final sw = Stopwatch()..start();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 600,
+            child: SmoothList(
+              itemCount: 10000,
+              itemExtentBuilder: (index) => 48 + (index % 4) * 12,
+              itemBuilder: (context, index) => Text('row $index'),
+            ),
+          ),
+        ),
+      );
+      sw.stop();
+
+      // ignore: avoid_print
+      print('SmoothList 10K initial pump: ${sw.elapsedMilliseconds}ms');
+      expect(find.text('row 0'), findsOneWidget);
+    });
+
+    testWidgets('SmoothTable initial build culls large column set', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            width: 320,
+            height: 300,
+            child: SmoothTable(
+              rowCount: 10000,
+              columnCount: 10000,
+              rowExtentBuilder: (_) => 36,
+              columnExtentBuilder: (_) => 80,
+              cellBuilder: (context, row, column) => Text('$row:$column'),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('0:0'), findsOneWidget);
+      expect(find.text('0:999'), findsNothing);
+    });
+  });
+
   // ============================================================
-  // 7. Memory Estimation
+  // 8. Memory Estimation
   // ============================================================
   group('Memory Estimate', () {
     test('LayoutCache + SpatialIndex memory for 1M items', () {

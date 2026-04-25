@@ -992,4 +992,175 @@ void main() {
       expect(items.indexOf(0), 4);
     });
   });
+
+  group('Smooth virtual views', () {
+    testWidgets('SmoothGrid restores scroll offset from session', (
+      tester,
+    ) async {
+      final session = SmoothSessionController(id: 'grid-a');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 300,
+            child: SmoothGrid(
+              itemCount: 100,
+              sessionController: session,
+              delegate: SmoothGridDelegate.count(
+                crossAxisCount: 1,
+                itemExtentBuilder: (_) => 80,
+              ),
+              itemBuilder: (context, index) => Text('grid $index'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.drag(find.byType(SmoothGrid), const Offset(0, -500));
+      await tester.pumpAndSettle();
+      final savedOffset = session.scrollOffset;
+      expect(savedOffset, greaterThan(0));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 300,
+            child: SmoothGrid(
+              itemCount: 100,
+              sessionController: session,
+              delegate: SmoothGridDelegate.count(
+                crossAxisCount: 1,
+                itemExtentBuilder: (_) => 80,
+              ),
+              itemBuilder: (context, index) => Text('grid $index'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(session.scrollOffset, savedOffset);
+    });
+
+    testWidgets('SmoothSectionedGrid renders session headers and items', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 500,
+            child: SmoothSectionedGrid(
+              sections: const [
+                SmoothGridSection(id: 'morning', itemCount: 2),
+                SmoothGridSection(id: 'afternoon', itemCount: 2),
+              ],
+              crossAxisCount: 2,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+              padding: const EdgeInsets.all(4),
+              headerBuilder: (context, sectionIndex) => SizedBox(
+                height: 48,
+                child: Text('session header $sectionIndex'),
+              ),
+              itemExtentBuilder: (_, _) => 60,
+              itemBuilder: (context, sectionIndex, itemIndex) =>
+                  Text('section $sectionIndex item $itemIndex'),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('session header 0'), findsOneWidget);
+      expect(find.text('session header 1'), findsOneWidget);
+      expect(find.text('section 0 item 0'), findsOneWidget);
+      expect(find.text('section 1 item 1'), findsOneWidget);
+    });
+
+    testWidgets('SmoothSectionedGrid can pin session headers', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 220,
+            child: SmoothSectionedGrid(
+              sections: const [
+                SmoothGridSection(id: 'first', itemCount: 20),
+                SmoothGridSection(id: 'second', itemCount: 20),
+              ],
+              pinnedHeaders: true,
+              pinnedHeaderExtent: 48,
+              crossAxisCount: 1,
+              headerBuilder: (context, sectionIndex) => ColoredBox(
+                color: const Color(0xFF000000),
+                child: Text('pinned header $sectionIndex'),
+              ),
+              itemExtentBuilder: (_, _) => 50,
+              itemBuilder: (context, sectionIndex, itemIndex) =>
+                  Text('pinned section $sectionIndex item $itemIndex'),
+            ),
+          ),
+        ),
+      );
+
+      final initialTop = tester.getTopLeft(find.text('pinned header 0')).dy;
+      await tester.drag(
+        find.byType(SmoothSectionedGrid),
+        const Offset(0, -180),
+      );
+      await tester.pump();
+
+      expect(tester.getTopLeft(find.text('pinned header 0')).dy, initialTop);
+    });
+
+    testWidgets('SmoothList builds variable extent items', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 300,
+            child: SmoothList(
+              itemCount: 20,
+              itemExtentBuilder: (index) => 40 + index.toDouble(),
+              itemBuilder: (context, index) => Text('list $index'),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('list 0'), findsOneWidget);
+      expect(find.text('list 3'), findsOneWidget);
+    });
+
+    testWidgets('SmoothTable culls cells and keeps pinned header/column', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            width: 240,
+            height: 200,
+            child: SmoothTable(
+              rowCount: 20,
+              columnCount: 50,
+              pinnedRows: 1,
+              pinnedColumns: 1,
+              rowExtentBuilder: (_) => 40,
+              columnExtentBuilder: (_) => 80,
+              cellBuilder: (context, row, column) => Text('$row:$column'),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('0:0'), findsOneWidget);
+      expect(find.text('0:2'), findsOneWidget);
+      expect(find.text('0:20'), findsNothing);
+
+      await tester.drag(find.byType(SmoothTable), const Offset(-500, 0));
+      await tester.pump();
+
+      expect(find.text('0:0'), findsOneWidget);
+      expect(find.text('1:0'), findsOneWidget);
+      expect(find.text('0:7'), findsWidgets);
+    });
+  });
 }
