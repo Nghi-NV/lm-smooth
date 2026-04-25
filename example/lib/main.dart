@@ -132,7 +132,7 @@ class _DemoTile extends StatelessWidget {
                 border: Border.all(color: const Color(0x22FFFFFF)),
                 gradient: LinearGradient(
                   colors: [
-                    accent.withValues(alpha: 0.42),
+                    demoColorWithAlpha(accent, 0.42),
                     const Color(0x1FFFFFFF),
                   ],
                   begin: Alignment.topLeft,

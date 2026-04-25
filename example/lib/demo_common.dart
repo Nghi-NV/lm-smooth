@@ -50,6 +50,10 @@ const _subtitleColor = Color(0x99FFFFFF);
 const _heartColor = Color(0xCCFF5252);
 const _likesColor = Color(0xB3FFFFFF);
 
+Color demoColorWithAlpha(Color color, double alpha) {
+  return color.withAlpha((alpha.clamp(0.0, 1.0) * 255).round());
+}
+
 class DemoItemCard extends StatelessWidget {
   final int index;
 
@@ -230,23 +234,23 @@ class DemoHeroHeader extends StatelessWidget {
                           title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.3,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.3,
+                                  ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: const Color(0xB3FFFFFF),
-                                fontSize: 12,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: const Color(0xB3FFFFFF),
+                                    fontSize: 12,
+                                  ),
                         ),
                       ],
                     ),
@@ -326,7 +330,7 @@ class DemoFeedCard extends StatelessWidget {
               border: Border.all(color: const Color(0x22FFFFFF)),
               gradient: LinearGradient(
                 colors: [
-                  color.withValues(alpha: 0.62),
+                  demoColorWithAlpha(color, 0.62),
                   const Color(0x29212A38),
                 ],
                 begin: Alignment.topLeft,

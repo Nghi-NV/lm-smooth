@@ -107,7 +107,7 @@ class _SmoothTableDemoPageState extends State<SmoothTableDemoPage> {
         gradient: LinearGradient(
           colors: isPinned
               ? [const Color(0xFF3B2E69), const Color(0xFF172033)]
-              : [accent.withValues(alpha: 0.26), const Color(0x1AFFFFFF)],
+              : [demoColorWithAlpha(accent, 0.26), const Color(0x1AFFFFFF)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -130,8 +130,8 @@ class _SmoothTableDemoPageState extends State<SmoothTableDemoPage> {
                 row == 0
                     ? 'Metric $column'
                     : column == 0
-                    ? 'Portfolio $row'
-                    : '${positive ? '+' : ''}${value.toStringAsFixed(1)}%',
+                        ? 'Portfolio $row'
+                        : '${positive ? '+' : ''}${value.toStringAsFixed(1)}%',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -139,8 +139,8 @@ class _SmoothTableDemoPageState extends State<SmoothTableDemoPage> {
                   color: isPinned
                       ? Colors.white
                       : (positive
-                            ? const Color(0xFF8DFFB1)
-                            : const Color(0xFFFF9D9D)),
+                          ? const Color(0xFF8DFFB1)
+                          : const Color(0xFFFF9D9D)),
                   fontWeight: isPinned ? FontWeight.w800 : FontWeight.w600,
                 ),
               ),

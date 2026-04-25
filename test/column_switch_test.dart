@@ -37,7 +37,6 @@ void main() {
                 key: const Key('switch'),
                 onPressed: () => setState(() {
                   columns = columns == 3 ? 4 : 3;
-                  debugPrint('[TEST] setState: columns=$columns');
                 }),
               ),
             ),
@@ -47,33 +46,25 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Find the first SmoothGridTile child and measure its width
     final firstItem = find.byKey(const ValueKey('item_0'));
     expect(firstItem, findsOneWidget);
     final size3col = tester.getSize(firstItem);
-    debugPrint('[TEST] 3 cols: item_0 width=${size3col.width}');
 
-    // Switch to 4 columns
     await tester.tap(find.byKey(const Key('switch')));
     await tester.pumpAndSettle();
 
-    // Measure again
     final size4col = tester.getSize(firstItem);
-    debugPrint('[TEST] 4 cols: item_0 width=${size4col.width}');
 
-    // Width MUST be different with different column count
     expect(
       size4col.width,
       lessThan(size3col.width),
       reason: 'Item width should decrease when switching from 3 to 4 columns',
     );
 
-    // Switch back to 3 columns
     await tester.tap(find.byKey(const Key('switch')));
     await tester.pumpAndSettle();
 
     final sizeBack = tester.getSize(firstItem);
-    debugPrint('[TEST] Back to 3 cols: item_0 width=${sizeBack.width}');
 
     expect(
       sizeBack.width,

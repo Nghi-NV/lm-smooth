@@ -31,9 +31,9 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     required MasonryLayoutConfig layoutConfig,
     required SmoothItemExtentBuilder itemExtentBuilder,
     required int itemCount,
-  }) : _layoutConfig = layoutConfig,
-       _itemExtentBuilder = itemExtentBuilder,
-       _itemCount = itemCount {
+  })  : _layoutConfig = layoutConfig,
+        _itemExtentBuilder = itemExtentBuilder,
+        _itemCount = itemCount {
     _layoutEngine = MasonryLayoutEngine(
       cache: _layoutCache,
       spatialIndex: _spatialIndex,
@@ -71,8 +71,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   set layoutConfig(MasonryLayoutConfig value) {
     final configChanged =
         _layoutConfig.crossAxisCount != value.crossAxisCount ||
-        _layoutConfig.mainAxisSpacing != value.mainAxisSpacing ||
-        _layoutConfig.crossAxisSpacing != value.crossAxisSpacing;
+            _layoutConfig.mainAxisSpacing != value.mainAxisSpacing ||
+            _layoutConfig.crossAxisSpacing != value.crossAxisSpacing;
 
     if (configChanged || _layoutConfig.viewportWidth != value.viewportWidth) {
       _layoutConfig = value;
@@ -143,8 +143,7 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
         return index;
       }
       final center = rect.center;
-      final score =
-          (contentOffset.dy - center.dy).abs() +
+      final score = (contentOffset.dy - center.dy).abs() +
           ((contentOffset.dx - center.dx).abs() * 0.75);
       if (score < bestScore) {
         bestScore = score;
@@ -266,9 +265,8 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     required int targetIndex,
     required Iterable<int> indices,
   }) {
-    final visibleIndices = indices is List<int>
-        ? indices
-        : indices.toList(growable: false);
+    final visibleIndices =
+        indices is List<int> ? indices : indices.toList(growable: false);
     final partialPreview = _simulatePartialReorderPreview(
       dragIndex: dragIndex,
       targetIndex: targetIndex,
@@ -407,9 +405,9 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
     final stride = _layoutConfig.columnWidth + _layoutConfig.crossAxisSpacing;
     if (stride <= 0) return 0;
     return ((x - _layoutConfig.paddingLeft) / stride).round().clamp(
-      0,
-      _layoutConfig.crossAxisCount - 1,
-    );
+          0,
+          _layoutConfig.crossAxisCount - 1,
+        );
   }
 
   void _fillBoundedPreviewOffsets({
@@ -765,8 +763,7 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
 
     final placeholderRect = _previewPlaceholderRect;
     if (hiddenChild != null && placeholderRect != null) {
-      final placeholderOffset =
-          offset +
+      final placeholderOffset = offset +
           Offset(
             placeholderRect.left,
             placeholderRect.top - constraints.scrollOffset,

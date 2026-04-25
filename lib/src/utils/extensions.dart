@@ -14,11 +14,11 @@ extension RectExtensions on Rect {
 
   /// Returns a new rect expanded by [amount] on all sides.
   Rect expand(double amount) => Rect.fromLTRB(
-    left - amount,
-    top - amount,
-    right + amount,
-    bottom + amount,
-  );
+        left - amount,
+        top - amount,
+        right + amount,
+        bottom + amount,
+      );
 }
 
 /// Extension methods on [Offset].

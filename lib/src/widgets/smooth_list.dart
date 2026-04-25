@@ -37,9 +37,9 @@ class SmoothList extends StatefulWidget {
     this.reorderable = false,
     this.onReorder,
   }) : assert(
-         !reorderable || onReorder != null,
-         'onReorder must be provided when reorderable is true',
-       );
+          !reorderable || onReorder != null,
+          'onReorder must be provided when reorderable is true',
+        );
 
   @override
   State<SmoothList> createState() => _SmoothListState();

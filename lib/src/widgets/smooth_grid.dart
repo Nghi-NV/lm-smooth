@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../interaction/auto_scroller.dart';
 import '../interaction/drag_engine.dart';
+import '../core/masonry_layout_engine.dart';
 import '../core/smooth_session.dart';
 import '../rendering/render_smooth_grid.dart';
 import 'smooth_grid_delegate.dart';
@@ -11,12 +12,12 @@ import 'smooth_grid_delegate.dart';
 typedef SmoothReorderStartCallback = void Function(int index);
 typedef SmoothReorderUpdateCallback = void Function(int oldIndex, int newIndex);
 typedef SmoothReorderEndCallback = void Function(int oldIndex, int newIndex);
-typedef SmoothSectionHeaderBuilder =
-    Widget Function(BuildContext context, int sectionIndex);
-typedef SmoothSectionItemBuilder =
-    Widget Function(BuildContext context, int sectionIndex, int itemIndex);
-typedef SmoothSectionItemExtentBuilder =
-    double Function(int sectionIndex, int itemIndex);
+typedef SmoothSectionHeaderBuilder = Widget Function(
+    BuildContext context, int sectionIndex);
+typedef SmoothSectionItemBuilder = Widget Function(
+    BuildContext context, int sectionIndex, int itemIndex);
+typedef SmoothSectionItemExtentBuilder = double Function(
+    int sectionIndex, int itemIndex);
 
 /// Describes one logical section in a [SmoothSectionedGrid].
 class SmoothGridSection {
@@ -93,9 +94,53 @@ class SmoothGrid extends StatefulWidget {
     this.useIsolate,
     this.sessionController,
   }) : assert(
-         !reorderable || onReorder != null,
-         'onReorder must be provided when reorderable is true',
-       );
+          !reorderable || onReorder != null,
+          'onReorder must be provided when reorderable is true',
+        );
+
+  /// Creates a high-performance masonry grid with a fixed column count.
+  ///
+  /// This constructor keeps the same performance model as [SmoothGrid]: it uses
+  /// [itemBuilder] for lazy child creation and requires [itemExtentBuilder] so
+  /// layout can be precomputed without measuring widgets at runtime.
+  SmoothGrid.count({
+    super.key,
+    required this.itemCount,
+    required this.itemBuilder,
+    this.findChildIndexCallback,
+    required int crossAxisCount,
+    double mainAxisSpacing = 0,
+    double crossAxisSpacing = 0,
+    EdgeInsets padding = EdgeInsets.zero,
+    required SmoothItemExtentBuilder itemExtentBuilder,
+    this.controller,
+    this.physics,
+    this.reorderable = false,
+    this.onTap,
+    this.onLongPress,
+    this.onReorder,
+    this.reorderConfig,
+    this.onReorderStart,
+    this.onReorderUpdate,
+    this.onReorderEnd,
+    this.addRepaintBoundaries = true,
+    this.addAutomaticKeepAlives = false,
+    this.cacheExtent,
+    this.scrollDirection = Axis.vertical,
+    this.shrinkWrap = false,
+    this.useIsolate,
+    this.sessionController,
+  })  : delegate = SmoothGridDelegateWithFixedCount(
+          crossAxisCount: crossAxisCount,
+          mainAxisSpacing: mainAxisSpacing,
+          crossAxisSpacing: crossAxisSpacing,
+          padding: padding,
+          itemExtentBuilder: itemExtentBuilder,
+        ),
+        assert(
+          !reorderable || onReorder != null,
+          'onReorder must be provided when reorderable is true',
+        );
 
   @override
   State<SmoothGrid> createState() => _SmoothGridState();
@@ -148,8 +193,8 @@ class SmoothSectionedGrid extends StatefulWidget {
     this.sessionController,
     this.pinnedHeaders = false,
     this.pinnedHeaderExtent = 96,
-  }) : assert(crossAxisCount > 0),
-       assert(pinnedHeaderExtent > 0);
+  })  : assert(crossAxisCount > 0),
+        assert(pinnedHeaderExtent > 0);
 
   @override
   State<SmoothSectionedGrid> createState() => _SmoothSectionedGridState();
@@ -197,9 +242,8 @@ class _SmoothSectionedGridState extends State<SmoothSectionedGrid> {
     }
     _sectionOffsetsDirty = true;
     if (_activePinnedSectionIndex >= widget.sections.length) {
-      _activePinnedSectionIndex = widget.sections.isEmpty
-          ? 0
-          : widget.sections.length - 1;
+      _activePinnedSectionIndex =
+          widget.sections.isEmpty ? 0 : widget.sections.length - 1;
     }
   }
 
@@ -236,11 +280,9 @@ class _SmoothSectionedGridState extends State<SmoothSectionedGrid> {
       shrinkWrap: widget.shrinkWrap,
       cacheExtent: widget.cacheExtent,
       slivers: [
-        for (
-          var sectionIndex = 0;
-          sectionIndex < widget.sections.length;
-          sectionIndex++
-        )
+        for (var sectionIndex = 0;
+            sectionIndex < widget.sections.length;
+            sectionIndex++)
           ..._buildSection(sectionIndex),
       ],
     );
@@ -302,11 +344,9 @@ class _SmoothSectionedGridState extends State<SmoothSectionedGrid> {
 
   int _sectionIndexForOffset(double offset) {
     _ensureSectionOffsets();
-    for (
-      var sectionIndex = _sectionStarts.length - 1;
-      sectionIndex >= 0;
-      sectionIndex--
-    ) {
+    for (var sectionIndex = _sectionStarts.length - 1;
+        sectionIndex >= 0;
+        sectionIndex--) {
       if (offset >= _sectionStarts[sectionIndex]) {
         return sectionIndex;
       }
@@ -319,15 +359,12 @@ class _SmoothSectionedGridState extends State<SmoothSectionedGrid> {
 
     final starts = <double>[];
     var sectionStart = 0.0;
-    for (
-      var sectionIndex = 0;
-      sectionIndex < widget.sections.length;
-      sectionIndex++
-    ) {
+    for (var sectionIndex = 0;
+        sectionIndex < widget.sections.length;
+        sectionIndex++) {
       starts.add(sectionStart);
       final section = widget.sections[sectionIndex];
-      sectionStart +=
-          widget.pinnedHeaderExtent +
+      sectionStart += widget.pinnedHeaderExtent +
           _estimateGridHeight(sectionIndex, section.itemCount);
     }
     _sectionStarts = starts;
@@ -350,8 +387,7 @@ class _SmoothSectionedGridState extends State<SmoothSectionedGrid> {
           shortestColumn = column;
         }
       }
-      columnHeights[shortestColumn] =
-          minHeight +
+      columnHeights[shortestColumn] = minHeight +
           widget.itemExtentBuilder(sectionIndex, itemIndex) +
           widget.mainAxisSpacing;
     }
@@ -493,40 +529,40 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
         if (widget.onTap != null)
           TapGestureRecognizer:
               GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
-                () => TapGestureRecognizer(debugOwner: this),
-                (instance) {
-                  instance.onTapUp = (details) {
-                    final index = _resolveIndexFromGlobalPosition(
-                      details.globalPosition,
-                    );
-                    if (index >= 0) {
-                      widget.onTap?.call(index);
-                    }
-                  };
-                },
-              ),
+            () => TapGestureRecognizer(debugOwner: this),
+            (instance) {
+              instance.onTapUp = (details) {
+                final index = _resolveIndexFromGlobalPosition(
+                  details.globalPosition,
+                );
+                if (index >= 0) {
+                  widget.onTap?.call(index);
+                }
+              };
+            },
+          ),
         LongPressGestureRecognizer:
             GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
-              () => LongPressGestureRecognizer(
-                debugOwner: this,
-                duration: _reorderConfig.longPressDelay,
-              ),
-              (instance) {
-                instance.onLongPressStart = (details) {
-                  final index = _resolveIndexFromGlobalPosition(
-                    details.globalPosition,
-                  );
-                  if (index >= 0) {
-                    _startDrag(index, details.globalPosition);
-                  }
-                };
-                instance.onLongPressMoveUpdate = (details) {
-                  _handleDragMove(details.globalPosition);
-                };
-                instance.onLongPressEnd = (_) => _finishDrag();
-                instance.onLongPressCancel = _cancelActiveDrag;
-              },
-            ),
+          () => LongPressGestureRecognizer(
+            debugOwner: this,
+            duration: _reorderConfig.longPressDelay,
+          ),
+          (instance) {
+            instance.onLongPressStart = (details) {
+              final index = _resolveIndexFromGlobalPosition(
+                details.globalPosition,
+              );
+              if (index >= 0) {
+                _startDrag(index, details.globalPosition);
+              }
+            };
+            instance.onLongPressMoveUpdate = (details) {
+              _handleDragMove(details.globalPosition);
+            };
+            instance.onLongPressEnd = (_) => _finishDrag();
+            instance.onLongPressCancel = _cancelActiveDrag;
+          },
+        ),
       },
       child: scrollView,
     );
@@ -568,9 +604,8 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final viewportBox = _scrollViewBox;
     if (renderGrid == null || viewportBox == null) return -1;
 
-    final viewportOffset = _scrollController.hasClients
-        ? _scrollController.position.pixels
-        : 0.0;
+    final viewportOffset =
+        _scrollController.hasClients ? _scrollController.position.pixels : 0.0;
     final pointerLocal =
         viewportBox.globalToLocal(globalPosition) + Offset(0, viewportOffset);
     return renderGrid.getItemIndexAt(pointerLocal);
@@ -588,9 +623,8 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     }
 
     final itemRect = renderGrid.getItemRect(index);
-    final viewportOffset = _scrollController.hasClients
-        ? _scrollController.position.pixels
-        : 0.0;
+    final viewportOffset =
+        _scrollController.hasClients ? _scrollController.position.pixels : 0.0;
     final viewportRect = Rect.fromLTWH(
       itemRect.left,
       itemRect.top - viewportOffset,
@@ -602,15 +636,14 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final pointerLocal =
         viewportBox.globalToLocal(globalPosition) + Offset(0, viewportOffset);
 
-    _dragEngine =
-        SmoothDragEngine(
-          collisionHysteresis: _reorderConfig.collisionHysteresis,
-        )..startDrag(
-          index: index,
-          dragRect: itemRect,
-          pointerGlobal: globalPosition,
-          pointerLocal: pointerLocal,
-        );
+    _dragEngine = SmoothDragEngine(
+      collisionHysteresis: _reorderConfig.collisionHysteresis,
+    )..startDrag(
+        index: index,
+        dragRect: itemRect,
+        pointerGlobal: globalPosition,
+        pointerLocal: pointerLocal,
+      );
 
     _autoScroller = AutoScroller(
       scrollController: _scrollController,
@@ -819,8 +852,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     }
 
     final clampedTarget = targetIndex.clamp(0, widget.itemCount);
-    final targetRect =
-        renderGrid.computeReorderTargetRect(
+    final targetRect = renderGrid.computeReorderTargetRect(
           dragIndex: dragIndex,
           targetIndex: clampedTarget,
         ) ??
@@ -873,27 +905,23 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final beforeOverlap = slot.beforeRect == null
         ? 0.0
         : _overlapRatio(dragRect, slot.beforeRect!);
-    final afterOverlap = slot.afterRect == null
-        ? 0.0
-        : _overlapRatio(dragRect, slot.afterRect!);
-    final anchorOverlap = beforeOverlap > afterOverlap
-        ? beforeOverlap
-        : afterOverlap;
+    final afterOverlap =
+        slot.afterRect == null ? 0.0 : _overlapRatio(dragRect, slot.afterRect!);
+    final anchorOverlap =
+        beforeOverlap > afterOverlap ? beforeOverlap : afterOverlap;
 
-    final targetDistance =
-        (dragCenter.dy - slot.targetRect.center.dy).abs() +
+    final targetDistance = (dragCenter.dy - slot.targetRect.center.dy).abs() +
         ((dragCenter.dx - slot.targetRect.center.dx).abs() * 0.6);
     final beforeDistance = slot.beforeRect == null
         ? double.infinity
         : (dragCenter.dy - slot.beforeRect!.center.dy).abs() +
-              ((dragCenter.dx - slot.beforeRect!.center.dx).abs() * 0.5);
+            ((dragCenter.dx - slot.beforeRect!.center.dx).abs() * 0.5);
     final afterDistance = slot.afterRect == null
         ? double.infinity
         : (dragCenter.dy - slot.afterRect!.center.dy).abs() +
-              ((dragCenter.dx - slot.afterRect!.center.dx).abs() * 0.5);
-    final anchorDistance = beforeDistance < afterDistance
-        ? beforeDistance
-        : afterDistance;
+            ((dragCenter.dx - slot.afterRect!.center.dx).abs() * 0.5);
+    final anchorDistance =
+        beforeDistance < afterDistance ? beforeDistance : afterDistance;
 
     return targetDistance +
         (anchorDistance.isFinite ? anchorDistance * 0.35 : 0.0) -
@@ -955,8 +983,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     final firstVisible = indices.isEmpty ? -1 : indices.first;
     final lastVisible = indices.isEmpty ? -1 : indices.last;
     final targetUnchanged = dragEngine.targetIndex == _lastPreviewTarget;
-    final viewportUnchanged =
-        firstVisible == _lastPreviewFirstVisible &&
+    final viewportUnchanged = firstVisible == _lastPreviewFirstVisible &&
         lastVisible == _lastPreviewLastVisible;
     if (targetUnchanged && viewportUnchanged) {
       return;
@@ -1133,8 +1160,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
     _previewController.stop();
     _autoScrollTicker?.stop();
 
-    final targetRect =
-        renderGrid.computeReorderTargetRect(
+    final targetRect = renderGrid.computeReorderTargetRect(
           dragIndex: dragEngine.dragIndex,
           targetIndex: dragEngine.targetIndex,
         ) ??
@@ -1239,14 +1265,14 @@ class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
     required bool addAutomaticKeepAlives,
     this.useIsolate,
   }) : super(
-         delegate: SliverChildBuilderDelegate(
-           itemBuilder,
-           childCount: itemCount,
-           findChildIndexCallback: findChildIndexCallback,
-           addRepaintBoundaries: addRepaintBoundaries,
-           addAutomaticKeepAlives: addAutomaticKeepAlives,
-         ),
-       );
+          delegate: SliverChildBuilderDelegate(
+            itemBuilder,
+            childCount: itemCount,
+            findChildIndexCallback: findChildIndexCallback,
+            addRepaintBoundaries: addRepaintBoundaries,
+            addAutomaticKeepAlives: addAutomaticKeepAlives,
+          ),
+        );
 
   @override
   SliverMultiBoxAdaptorElement createElement() =>

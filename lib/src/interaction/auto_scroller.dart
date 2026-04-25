@@ -19,7 +19,8 @@ class AutoScroller {
     required double viewportHeight,
   }) {
     if (viewportHeight <= 0) return false;
-    return pointerY < edgeThreshold || pointerY > viewportHeight - edgeThreshold;
+    return pointerY < edgeThreshold ||
+        pointerY > viewportHeight - edgeThreshold;
   }
 
   double computeVelocity({
@@ -36,8 +37,7 @@ class AutoScroller {
     final bottomStart = viewportHeight - edgeThreshold;
     if (pointerY > bottomStart) {
       final distanceFromBottom = viewportHeight - pointerY;
-      final ratio =
-          1.0 - (distanceFromBottom / edgeThreshold).clamp(0.0, 1.0);
+      final ratio = 1.0 - (distanceFromBottom / edgeThreshold).clamp(0.0, 1.0);
       return maxScrollVelocity * velocityCurve.transform(ratio);
     }
 

@@ -10,8 +10,8 @@ class HitTester {
   final SpatialIndex _spatialIndex;
 
   HitTester({required LayoutCache cache, required SpatialIndex spatialIndex})
-    : _cache = cache,
-      _spatialIndex = spatialIndex;
+      : _cache = cache,
+        _spatialIndex = spatialIndex;
 
   /// Returns the item index at position (x, y) relative to grid origin,
   /// or -1 if no item is at that position.

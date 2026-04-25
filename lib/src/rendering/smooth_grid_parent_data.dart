@@ -12,7 +12,6 @@ class SmoothGridParentData extends SliverMultiBoxAdaptorParentData {
   double crossAxisOffset = 0;
 
   @override
-  String toString() =>
-      'SmoothGridParentData(index=$index, column=$column, '
+  String toString() => 'SmoothGridParentData(index=$index, column=$column, '
       'crossAxisOffset=$crossAxisOffset, layoutOffset=$layoutOffset)';
 }

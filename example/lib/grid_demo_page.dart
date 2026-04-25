@@ -106,9 +106,8 @@ class _GridDemoPageState extends State<GridDemoPage> {
       floatingActionButton: FloatingActionButton.small(
         onPressed: () => setState(() {
           _reorderable = !_reorderable;
-          _reorderItems = _reorderable
-              ? List.generate(_itemCount, (i) => i)
-              : null;
+          _reorderItems =
+              _reorderable ? List.generate(_itemCount, (i) => i) : null;
         }),
         tooltip: _reorderable ? 'Disable drag' : 'Enable drag',
         child: Icon(_reorderable ? Icons.lock_open : Icons.drag_indicator),
@@ -118,7 +117,7 @@ class _GridDemoPageState extends State<GridDemoPage> {
 
   /// SmoothGrid mode
   Widget _buildSmoothGrid() {
-    return SmoothGrid(
+    return SmoothGrid.count(
       key: ValueKey(_activeGridSession.session.id),
       itemCount: _itemCount,
       sessionController: _activeGridSession,
@@ -134,15 +133,13 @@ class _GridDemoPageState extends State<GridDemoPage> {
               return null;
             }
           : null,
-      delegate: SmoothGridDelegate.count(
-        crossAxisCount: _columns,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-        padding: const EdgeInsets.all(6),
-        itemExtentBuilder: _reorderable
-            ? (index) => heightForIndex(_items[index])
-            : (index) => heightForIndex(index),
-      ),
+      crossAxisCount: _columns,
+      mainAxisSpacing: 6,
+      crossAxisSpacing: 6,
+      padding: const EdgeInsets.all(6),
+      itemExtentBuilder: _reorderable
+          ? (index) => heightForIndex(_items[index])
+          : (index) => heightForIndex(index),
       itemBuilder: (context, index) {
         final itemIndex = _reorderable ? _items[index] : index;
         return SmoothGridTile(

@@ -39,9 +39,8 @@ class _SectionedGridDemoPageState extends State<SectionedGridDemoPage> {
             onPressed: () => setState(() => _dragSort = !_dragSort),
           ),
           IconButton(
-            tooltip: _pinnedHeaders
-                ? 'Disable pin header'
-                : 'Enable pin header',
+            tooltip:
+                _pinnedHeaders ? 'Disable pin header' : 'Enable pin header',
             icon: Icon(
               _pinnedHeaders ? Icons.push_pin : Icons.push_pin_outlined,
             ),
@@ -107,7 +106,7 @@ class _SectionedGridDemoPageState extends State<SectionedGridDemoPage> {
           ),
         ),
         Expanded(
-          child: SmoothGrid(
+          child: SmoothGrid.count(
             key: ValueKey('drag_session_${section.title}'),
             itemCount: items.length,
             reorderable: true,
@@ -119,13 +118,11 @@ class _SectionedGridDemoPageState extends State<SectionedGridDemoPage> {
               }
               return null;
             },
-            delegate: SmoothGridDelegate.count(
-              crossAxisCount: 2,
-              mainAxisSpacing: 6,
-              crossAxisSpacing: 6,
-              padding: const EdgeInsets.fromLTRB(6, 0, 6, 10),
-              itemExtentBuilder: (index) => heightForIndex(items[index]),
-            ),
+            crossAxisCount: 2,
+            mainAxisSpacing: 6,
+            crossAxisSpacing: 6,
+            padding: const EdgeInsets.fromLTRB(6, 0, 6, 10),
+            itemExtentBuilder: (index) => heightForIndex(items[index]),
             itemBuilder: (context, index) {
               final item = items[index];
               return SmoothGridTile(
@@ -170,7 +167,7 @@ class _SessionStrip extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
           scrollDirection: Axis.horizontal,
           itemCount: sections.length,
-          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          separatorBuilder: (context, index) => const SizedBox(width: 8),
           itemBuilder: (context, index) {
             final section = sections[index];
             final selected = index == activeIndex;
@@ -190,7 +187,7 @@ class _SessionStrip extends StatelessWidget {
                   gradient: LinearGradient(
                     colors: selected
                         ? [
-                            section.color.withValues(alpha: 0.42),
+                            demoColorWithAlpha(section.color, 0.42),
                             const Color(0xFF111A24),
                           ]
                         : const [Color(0x22111A24), Color(0x14111A24)],
@@ -279,10 +276,10 @@ class _SessionHeader extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: section.color.withValues(alpha: 0.45)),
+            border: Border.all(color: demoColorWithAlpha(section.color, 0.45)),
             gradient: LinearGradient(
               colors: [
-                section.color.withValues(alpha: 0.38),
+                demoColorWithAlpha(section.color, 0.38),
                 const Color(0xE6101820),
               ],
               begin: Alignment.centerLeft,
@@ -298,7 +295,7 @@ class _SessionHeader extends StatelessWidget {
                   height: 34,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: section.color.withValues(alpha: 0.26),
+                    color: demoColorWithAlpha(section.color, 0.26),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(

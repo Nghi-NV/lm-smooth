@@ -91,8 +91,8 @@ class MasonryLayoutEngine {
   final SpatialIndex spatialIndex;
 
   MasonryLayoutEngine({LayoutCache? cache, SpatialIndex? spatialIndex})
-    : cache = cache ?? LayoutCache(),
-      spatialIndex = spatialIndex ?? SpatialIndex(cache ?? LayoutCache());
+      : cache = cache ?? LayoutCache(),
+        spatialIndex = spatialIndex ?? SpatialIndex(cache ?? LayoutCache());
 
   /// Compute the full layout for [itemCount] items.
   ///

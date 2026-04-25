@@ -3,8 +3,8 @@ import 'package:flutter/widgets.dart';
 import '../core/smooth_session.dart';
 
 /// Builds a virtualized table cell.
-typedef SmoothTableCellBuilder =
-    Widget Function(BuildContext context, int row, int column);
+typedef SmoothTableCellBuilder = Widget Function(
+    BuildContext context, int row, int column);
 
 typedef SmoothTableExtentBuilder = double Function(int index);
 
@@ -35,8 +35,8 @@ class SmoothTable extends StatefulWidget {
     this.horizontalController,
     this.sessionController,
     this.cacheExtent,
-  }) : assert(pinnedRows >= 0),
-       assert(pinnedColumns >= 0);
+  })  : assert(pinnedRows >= 0),
+        assert(pinnedColumns >= 0);
 
   @override
   State<SmoothTable> createState() => _SmoothTableState();
@@ -91,9 +91,8 @@ class _SmoothTableState extends State<SmoothTable> {
       oldWidget.horizontalController?.removeListener(_syncHorizontalOffset);
       _ownedHorizontalController?.removeListener(_syncHorizontalOffset);
       _ownedHorizontalController?.dispose();
-      _ownedHorizontalController = widget.horizontalController == null
-          ? ScrollController()
-          : null;
+      _ownedHorizontalController =
+          widget.horizontalController == null ? ScrollController() : null;
       _horizontalController.addListener(_syncHorizontalOffset);
     }
   }
@@ -139,9 +138,8 @@ class _SmoothTableState extends State<SmoothTable> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        _horizontalViewportWidth = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : 0;
+        _horizontalViewportWidth =
+            constraints.maxWidth.isFinite ? constraints.maxWidth : 0;
         _totalWidth = _sumColumnWidth(0, widget.columnCount);
         _pinnedWidth = _sumColumnWidth(
           0,
@@ -236,9 +234,8 @@ class _TableRow extends StatelessWidget {
       final right = x + width;
       final isPinned = column < pinnedColumns;
       if (isPinned || (right >= visibleStart && x <= visibleEnd)) {
-        final visualLeft = isPinned
-            ? x
-            : pinnedWidth + x - pinnedWidth - horizontalOffset;
+        final visualLeft =
+            isPinned ? x : pinnedWidth + x - pinnedWidth - horizontalOffset;
         final child = Positioned(
           left: visualLeft,
           top: 0,

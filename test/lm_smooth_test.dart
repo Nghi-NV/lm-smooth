@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lm_smooth/lm_smooth.dart';
+import 'package:lm_smooth/src/core/layout_cache.dart';
+import 'package:lm_smooth/src/core/masonry_layout_engine.dart';
+import 'package:lm_smooth/src/core/spatial_index.dart';
+import 'package:lm_smooth/src/interaction/auto_scroller.dart';
+import 'package:lm_smooth/src/interaction/drag_engine.dart'
+    show SmoothDragEngine;
+import 'package:lm_smooth/src/interaction/gesture_recognizer.dart';
+import 'package:lm_smooth/src/rendering/render_smooth_grid.dart';
 
 void main() {
   group('LayoutCache', () {
@@ -521,9 +529,8 @@ void main() {
           ),
         );
 
-        final renderGrid = tester.allRenderObjects
-            .whereType<RenderSmoothGrid>()
-            .single;
+        final renderGrid =
+            tester.allRenderObjects.whereType<RenderSmoothGrid>().single;
         final targetRect = renderGrid.computeReorderTargetRect(
           dragIndex: 0,
           targetIndex: 4,
@@ -679,7 +686,7 @@ void main() {
                   color: Colors.red,
                 ),
               ),
-              onReorder: (_, _) {},
+              onReorder: (oldIndex, newIndex) {},
             ),
           ),
         ),
@@ -740,7 +747,7 @@ void main() {
                 ),
               ),
               onReorderStart: (index) => dragStartIndex = index,
-              onReorder: (_, _) {},
+              onReorder: (oldIndex, newIndex) {},
             ),
           ),
         ),
@@ -786,8 +793,8 @@ void main() {
                     child: Text('${items[index]}'),
                   ),
                 ),
-                onReorderUpdate: (_, newIndex) => lastTarget = newIndex,
-                onReorder: (_, _) {},
+                onReorderUpdate: (oldIndex, newIndex) => lastTarget = newIndex,
+                onReorder: (oldIndex, newIndex) {},
               ),
             ),
           ),
@@ -905,8 +912,8 @@ void main() {
                     child: Text('${items[index]}'),
                   ),
                 ),
-                onReorderUpdate: (_, newIndex) => lastTarget = newIndex,
-                onReorder: (_, _) {},
+                onReorderUpdate: (oldIndex, newIndex) => lastTarget = newIndex,
+                onReorder: (oldIndex, newIndex) {},
               ),
             ),
           ),
@@ -1043,6 +1050,31 @@ void main() {
       expect(session.scrollOffset, savedOffset);
     });
 
+    testWidgets('SmoothGrid.count builds fixed-column masonry lazily', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 240,
+            child: SmoothGrid.count(
+              itemCount: 20,
+              crossAxisCount: 2,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+              padding: const EdgeInsets.all(4),
+              itemExtentBuilder: (index) => 50 + index.toDouble(),
+              itemBuilder: (context, index) => Text('count grid $index'),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('count grid 0'), findsOneWidget);
+      expect(find.text('count grid 3'), findsOneWidget);
+      expect(find.text('count grid 19'), findsOneWidget);
+    });
+
     testWidgets('SmoothSectionedGrid renders session headers and items', (
       tester,
     ) async {
@@ -1063,7 +1095,7 @@ void main() {
                 height: 48,
                 child: Text('session header $sectionIndex'),
               ),
-              itemExtentBuilder: (_, _) => 60,
+              itemExtentBuilder: (sectionIndex, itemIndex) => 60,
               itemBuilder: (context, sectionIndex, itemIndex) =>
                   Text('section $sectionIndex item $itemIndex'),
             ),
@@ -1094,7 +1126,7 @@ void main() {
                 color: const Color(0xFF000000),
                 child: Text('pinned header $sectionIndex'),
               ),
-              itemExtentBuilder: (_, _) => 50,
+              itemExtentBuilder: (sectionIndex, itemIndex) => 50,
               itemBuilder: (context, sectionIndex, itemIndex) =>
                   Text('pinned section $sectionIndex item $itemIndex'),
             ),

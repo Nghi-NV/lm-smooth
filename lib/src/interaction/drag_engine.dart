@@ -142,9 +142,8 @@ class SmoothDragEngine {
 
       final containsPointer = rect.contains(pointer);
       final overlapsDraggedRect = draggedRect.overlaps(rect);
-      final intersection = overlapsDraggedRect
-          ? draggedRect.intersect(rect)
-          : Rect.zero;
+      final intersection =
+          overlapsDraggedRect ? draggedRect.intersect(rect) : Rect.zero;
       final overlapArea = intersection.width > 0 && intersection.height > 0
           ? intersection.width * intersection.height
           : 0.0;
@@ -156,8 +155,8 @@ class SmoothDragEngine {
       final score = overlapsDraggedRect
           ? (dy * 0.45) + (dx * 0.25)
           : containsPointer
-          ? (dy + dx * 0.15)
-          : (dy * 0.9) + (dx * 0.75);
+              ? (dy + dx * 0.15)
+              : (dy * 0.9) + (dx * 0.75);
 
       if (overlapsDraggedRect && !hitOverlappingItem) {
         bestScore = double.infinity;
@@ -175,8 +174,7 @@ class SmoothDragEngine {
       if (hitContainedItem && !containsPointer) {
         continue;
       }
-      final overlapWins =
-          overlapsDraggedRect &&
+      final overlapWins = overlapsDraggedRect &&
           (overlapRatio > bestOverlapRatio + 0.08 ||
               ((overlapRatio - bestOverlapRatio).abs() <= 0.08 &&
                   score < bestScore));
@@ -212,8 +210,7 @@ class SmoothDragEngine {
 
     final clampedTarget = candidateTarget.clamp(0, maxTargetIndex);
 
-    final nearSplitBoundary =
-        distanceFromSplit.abs() <= deadZone &&
+    final nearSplitBoundary = distanceFromSplit.abs() <= deadZone &&
         (_targetIndex == beforeTarget || _targetIndex == afterTarget);
     if (nearSplitBoundary) {
       return _targetIndex;

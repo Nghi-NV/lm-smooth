@@ -1,5 +1,5 @@
 name: lm_smooth
-description: "High-performance masonry grid for Flutter with precomputed layout, large-list scrolling, and long-press drag reorder."
+description: High-performance virtualized masonry grid for Flutter with known item extents, pinned sections, sessions, and drag reorder.
 version: 0.1.0
 homepage: https://github.com/Nghi-NV/lm-smooth
 repository: https://github.com/Nghi-NV/lm-smooth
@@ -9,10 +9,10 @@ topics:
   - masonry
   - staggered
   - performance
-  - dragdrop
+  - reorder
 
 environment:
-  sdk: ^3.11.1
+  sdk: ">=3.4.0 <4.0.0"
   flutter: ">=3.22.0"
 
 dependencies:

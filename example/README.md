@@ -1,17 +1,18 @@
-# lm_smooth_example
+# lm_smooth example
 
-A new Flutter project.
+A runnable example app for `lm_smooth`.
 
-## Getting Started
+The app includes separate screens for:
 
-This project is a starting point for a Flutter application.
+- `SmoothGrid` with large item counts, column switching, and reorder
+- `SmoothSectionedGrid` with pinned section headers
+- horizontal `SmoothList`
+- vertical `SmoothList`
+- `SmoothTable` with pinned rows and columns
 
-A few resources to get you started if this is your first Flutter project:
+Run from the package root:
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+cd example
+flutter run
+```

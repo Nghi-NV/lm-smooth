@@ -28,8 +28,8 @@ class LayoutCache {
   /// Creates a [LayoutCache] with the given [chunkSize].
   /// [chunkSize] must be a power of 2.
   LayoutCache({this.chunkSize = kDefaultChunkSize})
-    : _chunkShift = _log2(chunkSize),
-      _chunkMask = chunkSize - 1 {
+      : _chunkShift = _log2(chunkSize),
+        _chunkMask = chunkSize - 1 {
     assert(
       chunkSize > 0 && (chunkSize & (chunkSize - 1)) == 0,
       'chunkSize must be a power of 2',

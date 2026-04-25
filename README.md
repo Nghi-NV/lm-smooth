@@ -1,109 +1,107 @@
 # lm_smooth
 
-High-performance staggered/masonry grid for Flutter, built for large datasets and smooth scrolling.
+High-performance virtualized masonry views for Flutter.
 
-`lm_smooth` uses a custom `RenderSliver`, precomputed layout, a spatial index, and optional isolate-based layout computation so the grid can stay responsive even with very large item counts.
+`lm_smooth` is built for feeds, dashboards, and device grids where item heights are known ahead of time. It avoids runtime child measurement, precomputes item geometry, and keeps scrolling predictable for large datasets.
 
 ![lm_smooth example grid](doc/screenshots/example-grid.png)
 
 ## Features
 
-- Masonry / staggered grid layout with fixed column count
-- Custom render pipeline instead of `GridView` composition overhead
-- Precomputed item geometry with O(1) rect lookup
-- Spatial index for fast visible-range queries
-- Optional isolate offload for very large datasets
-- Reorder support with long-press drag, preview translation, and edge auto-scroll
-- Optional view sessions for restoring scroll/selection/reorder draft state
-- Sectioned masonry grids with multiple in-scroll session headers
-- Experimental `SmoothList` and `SmoothTable` virtualized views
-- Works well for feeds, galleries, boards, and uneven card layouts
+- Fixed-column masonry grid with uneven item heights
+- Lazy item building with a custom sliver render pipeline
+- Precomputed layout cache and spatial index for fast viewport queries
+- Optional isolate layout computation for large item counts
+- Long-press drag reorder with preview animation and edge auto-scroll
+- Sectioned grids with in-scroll or pinned headers
+- Scroll-state sessions for tabs/pages that need restore behavior
+- Known-extent vertical and horizontal lists
+- Basic virtualized table with pinned rows and columns
 
-## When To Use
+## When to use it
 
 Use `lm_smooth` when:
 
-- your items have uneven heights
-- you already know each item's extent up front
-- your dataset is large enough that normal staggered/grid solutions start dropping frames
-- you want a masonry grid with reorder support
+- item heights are available from your model or can be computed cheaply
+- you need a masonry feed with many items
+- you want built-in drag reorder for a vertical masonry grid
+- you need section headers, pinned headers, or scroll-state restore
+- you want predictable scroll performance over runtime measurement flexibility
 
-Do not use it if your layout depends on measuring child widgets at runtime. This package is designed around precomputed heights.
+Use a runtime-measured staggered grid instead if item height depends on laying out unknown child content.
 
-## Installation
-
-Add the dependency:
+## Install
 
 ```yaml
 dependencies:
   lm_smooth: ^0.1.0
 ```
 
-Then import it:
-
 ```dart
 import 'package:lm_smooth/lm_smooth.dart';
 ```
 
-## Pub.dev Highlights
-
-- Designed for uneven-height, masonry-style feeds
-- Handles very large item counts with cached geometry and indexed visibility queries
-- Includes built-in reorder support instead of requiring a separate drag-sort layer
-- Ships with a runnable example app in [`example/`](./example)
-
-## Quick Start
+## Quick start
 
 ```dart
-import 'package:flutter/material.dart';
-import 'package:lm_smooth/lm_smooth.dart';
-
 class DemoPage extends StatelessWidget {
   DemoPage({super.key});
 
-  final items = List.generate(1000, (i) => i);
+  final items = List.generate(1000, (index) => index);
 
-  double _heightFor(int index) {
-    return 100 + (index % 5) * 24.0;
-  }
+  double heightForItem(int item) => 100 + (item % 5) * 24.0;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SmoothGrid(
-        itemCount: items.length,
-        delegate: SmoothGridDelegate.count(
-          crossAxisCount: 3,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          padding: const EdgeInsets.all(8),
-          itemExtentBuilder: (index) => _heightFor(items[index]),
-        ),
-        itemBuilder: (context, index) {
-          final item = items[index];
-          return SmoothGridTile(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.blueGrey,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              alignment: Alignment.center,
-              child: Text('Item $item'),
-            ),
-          );
-        },
-        onTap: (index) {
-          debugPrint('Tapped ${items[index]}');
-        },
-      ),
+    return SmoothGrid.count(
+      itemCount: items.length,
+      crossAxisCount: 3,
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+      padding: const EdgeInsets.all(8),
+      itemExtentBuilder: (index) => heightForItem(items[index]),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return SmoothGridTile(
+          child: Card(
+            child: Center(child: Text('Item $item')),
+          ),
+        );
+      },
     );
   }
 }
 ```
 
-## Reorder Example
+## Migrating from `StaggeredGrid.count`
 
-To enable drag reorder, pass `reorderable: true` and update your data source inside `onReorder`.
+`StaggeredGrid.count(children: ...)` builds from a list of widgets and lets Flutter determine child size. `SmoothGrid` is different: it keeps performance predictable by requiring an extent for each item.
+
+Prefer the builder API:
+
+```dart
+SmoothGrid.count(
+  itemCount: devices.length,
+  crossAxisCount: crossAxisCount,
+  crossAxisSpacing: AppDimension.verticalAxisSpacingCard,
+  mainAxisSpacing: AppDimension.horizontalAxisSpacingCard,
+  itemExtentBuilder: (index) => deviceCardHeight(devices[index]),
+  itemBuilder: (context, index) {
+    final device = devices[index];
+    return SmoothGridTile(
+      key: ValueKey(device.id),
+      child: DevicesGroupsItem(
+        hasBlur: true,
+        device: device,
+      ),
+    );
+  },
+)
+```
+
+Avoid passing a prebuilt `children` list for large collections. Builder-based usage preserves lazy construction and is the recommended path for performance.
+
+## Drag reorder
 
 ```dart
 class ReorderDemo extends StatefulWidget {
@@ -114,31 +112,25 @@ class ReorderDemo extends StatefulWidget {
 }
 
 class _ReorderDemoState extends State<ReorderDemo> {
-  final items = List.generate(200, (i) => i);
+  final items = List.generate(200, (index) => index);
 
-  double _heightFor(int index) => 80 + (index % 6) * 20.0;
+  double heightForItem(int item) => 80 + (item % 6) * 20.0;
 
   @override
   Widget build(BuildContext context) {
-    return SmoothGrid(
+    return SmoothGrid.count(
       itemCount: items.length,
       reorderable: true,
-      reorderConfig: const SmoothReorderConfig(
-        longPressDelay: Duration(milliseconds: 220),
-      ),
-      delegate: SmoothGridDelegate.count(
-        crossAxisCount: 2,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        padding: const EdgeInsets.all(8),
-        itemExtentBuilder: (index) => _heightFor(items[index]),
-      ),
+      crossAxisCount: 2,
+      mainAxisSpacing: 8,
+      crossAxisSpacing: 8,
+      padding: const EdgeInsets.all(8),
+      itemExtentBuilder: (index) => heightForItem(items[index]),
       itemBuilder: (context, index) {
         final item = items[index];
         return SmoothGridTile(
-          child: Card(
-            child: Center(child: Text('Item $item')),
-          ),
+          key: ValueKey(item),
+          child: Card(child: Center(child: Text('Item $item'))),
         );
       },
       onReorder: (oldIndex, newIndex) {
@@ -153,108 +145,108 @@ class _ReorderDemoState extends State<ReorderDemo> {
 }
 ```
 
-## API Overview
+Use stable keys when reordering stateful children.
 
-### `SmoothGrid`
+## Sectioned grid
 
-Main widget for rendering the masonry grid.
+`SmoothSectionedGrid` renders multiple masonry sections in one scroll view. Headers can scroll normally or remain pinned.
 
-Important parameters:
+```dart
+SmoothSectionedGrid(
+  sections: const [
+    SmoothGridSection(id: 'today', itemCount: 40),
+    SmoothGridSection(id: 'archive', itemCount: 80),
+  ],
+  pinnedHeaders: true,
+  pinnedHeaderExtent: 56,
+  crossAxisCount: 2,
+  headerBuilder: (context, sectionIndex) => Text('Section $sectionIndex'),
+  itemExtentBuilder: (sectionIndex, itemIndex) => 120,
+  itemBuilder: (context, sectionIndex, itemIndex) {
+    return SmoothGridTile(child: Text('$sectionIndex / $itemIndex'));
+  },
+)
+```
 
-- `itemCount`: total item count
-- `itemBuilder`: builds visible items only
-- `delegate`: grid layout configuration
-- `controller`: optional `ScrollController`
-- `reorderable`: enables long-press drag reorder
-- `onReorder`: commit reorder back into your data source
-- `onTap`: optional tap callback
-- `onLongPress`: optional long-press callback when reorder is disabled
-- `cacheExtent`: overscan area
-- `useIsolate`: force or disable isolate layout computation
-- `sessionController`: optional `SmoothSessionController` for view-state restore
+## Sessions
 
-### `SmoothSectionedGrid`
+Use `SmoothSessionController` when a view needs to restore scroll offset after switching tabs/pages or rebuilding the route.
 
-SmoothGrid-like masonry layout for grouped feeds where each session/category/day
-needs its own header inside the same scrollable viewport.
+```dart
+final session = SmoothSessionController(id: 'devices');
 
-Important parameters:
+SmoothGrid.count(
+  sessionController: session,
+  itemCount: devices.length,
+  crossAxisCount: 2,
+  itemExtentBuilder: (index) => deviceCardHeight(devices[index]),
+  itemBuilder: (context, index) => DeviceCard(device: devices[index]),
+)
+```
 
-- `sections`: ordered list of `SmoothGridSection` groups
-- `headerBuilder`: builds each in-scroll section header
-- `itemBuilder`: builds visible items for a specific section
-- `itemExtentBuilder`: returns each section item's known height
-- `crossAxisCount`, spacing, and `padding`: shared masonry layout settings
-- `pinnedHeaders` and `pinnedHeaderExtent`: keep the active session header sticky while scrolling
+Dispose the controller when the owning widget is disposed.
 
-### `SmoothList`
+## API overview
 
-Known-extent virtualized list with optional session restore and one-column reorder.
+### SmoothGrid
 
-### `SmoothTable`
+Primary masonry grid widget.
 
-Early 2D virtualized table API for large row/column datasets. Rows are virtualized vertically and cells are culled horizontally.
+Common parameters:
 
-### `SmoothGridDelegate.count`
+- `itemCount`
+- `itemBuilder`
+- `itemExtentBuilder` via `SmoothGrid.count`
+- `delegate` for custom grid configuration
+- `controller`, `physics`, `cacheExtent`
+- `reorderable`, `onReorder`, `reorderConfig`
+- `sessionController`
 
-Layout delegate with:
+### SmoothSectionedGrid
 
-- `crossAxisCount`
-- `mainAxisSpacing`
-- `crossAxisSpacing`
-- `padding`
+Grouped masonry grid with section headers.
+
+- `sections`
+- `headerBuilder`
+- `itemBuilder`
 - `itemExtentBuilder`
+- `pinnedHeaders`
+- `pinnedHeaderExtent`
 
-### `SmoothReorderConfig`
+### SmoothList
 
-Drag-reorder tuning:
+Known-extent `ListView` convenience wrapper with vertical and horizontal support.
 
-- `longPressDelay`
-- `liftScale`
-- `ghostOpacity`
-- `settleDuration`
-- `translateDuration`
-- `edgeScrollZone`
-- `maxAutoScrollVelocity`
-- `collisionHysteresis`
+### SmoothTable
 
-## Performance Notes
+Early data-grid style widget for large row/column datasets. It supports vertical row virtualization, horizontal cell culling, and pinned rows/columns.
 
-This package is fast because it avoids runtime measurement. To get good results:
+## Performance notes
 
-- keep `itemExtentBuilder` cheap and deterministic
-- precompute heights from your model data when possible
-- avoid doing network/image metadata work inside `itemExtentBuilder`
-- use stable keys for stateful children when reordering
-- prefer simple item trees for very large feeds
+- Keep `itemExtentBuilder` cheap and deterministic.
+- Precompute heights from model data when possible.
+- Do not measure widgets inside `itemExtentBuilder`.
+- Prefer builder APIs over prebuilt child lists.
+- Use stable keys for reorderable items.
+- Tune `cacheExtent` for your item complexity and target devices.
 
-For very large datasets, `lm_smooth` can offload layout computation to an isolate automatically.
+## Current limitations
 
-## Current Constraints
+- Item extents must be known ahead of time.
+- Reorder is focused on vertical `SmoothGrid`.
+- `SmoothSectionedGrid` does not yet support cross-section reorder.
+- Horizontal masonry grid/reorder is not yet supported.
+- `SmoothTable` is intentionally small and focused; it is not a full spreadsheet component.
 
-- reorder support is currently focused on vertical `SmoothGrid`
-- the layout model assumes heights are known in advance
-- fixed-column masonry is supported; arbitrary adaptive breakpoints are not built in yet
+## Example app
 
-## Example App
+The example app contains focused screens for:
 
-A runnable example is included in [`example/lib/main.dart`](./example/lib/main.dart). It demonstrates:
-
-- 1K to 1M items
-- grid/list comparison
-- column switching
-- reorder mode
-- multiple session headers inside one scroll
-- horizontal `SmoothList` virtualization
-- varied card heights
-
-Example screens are split into focused files:
-
-- [`grid_demo_page.dart`](./example/lib/grid_demo_page.dart): SmoothGrid stress, reorder, sessions
-- [`sectioned_grid_demo_page.dart`](./example/lib/sectioned_grid_demo_page.dart): pinned session headers in one scroll
-- [`horizontal_demo_page.dart`](./example/lib/horizontal_demo_page.dart): horizontal SmoothList
-- [`smooth_list_demo_page.dart`](./example/lib/smooth_list_demo_page.dart): vertical SmoothList
-- [`smooth_table_demo_page.dart`](./example/lib/smooth_table_demo_page.dart): pinned SmoothTable
+- large masonry grid and reorder
+- pinned section headers
+- horizontal known-extent list
+- vertical known-extent list
+- pinned table rows/columns
 
 Run it with:
 
@@ -263,36 +255,14 @@ cd example
 flutter run
 ```
 
-## Publish Checklist
+## Benchmarks
 
-Before publishing, verify:
+Benchmarks live in `benchmark/` and can be run with:
 
-- `README.md` matches the current public API
-- `CHANGELOG.md` describes the release accurately
-- `pubspec.yaml` has correct repository metadata
-- `flutter test` passes
-- `dart pub publish --dry-run` completes without warnings you care about
-
-## Why This Package Exists
-
-Most Flutter masonry/grid solutions are convenient, but once the dataset gets large, scroll and layout cost become the bottleneck. `lm_smooth` takes a lower-level approach:
-
-- custom sliver rendering
-- cached geometry
-- range queries via spatial index
-- minimal per-frame work during scroll
-
-The goal is not just feature parity. The goal is predictable performance.
-
-## Contributing
-
-Issues and PRs are welcome. Useful contributions include:
-
-- performance benchmarks
-- reorder UX polish
-- more tests around large datasets
-- docs and example improvements
+```bash
+flutter test benchmark/layout_benchmark_test.dart --reporter expanded
+```
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

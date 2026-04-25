@@ -39,9 +39,8 @@ class SmoothViewSession {
       id: id ?? this.id,
       scrollOffset: scrollOffset ?? this.scrollOffset,
       selectedKeys: selectedKeys ?? this.selectedKeys,
-      reorderDraft: clearReorderDraft
-          ? null
-          : reorderDraft ?? this.reorderDraft,
+      reorderDraft:
+          clearReorderDraft ? null : reorderDraft ?? this.reorderDraft,
       layoutCacheKey: layoutCacheKey ?? this.layoutCacheKey,
       viewportSize: viewportSize ?? this.viewportSize,
     );
@@ -54,7 +53,7 @@ class SmoothSessionController extends ChangeNotifier {
   ScrollController? _attachedController;
 
   SmoothSessionController({required String id})
-    : _session = SmoothViewSession(id: id);
+      : _session = SmoothViewSession(id: id);
 
   SmoothViewSession get session => _session;
   double get scrollOffset => _session.scrollOffset;

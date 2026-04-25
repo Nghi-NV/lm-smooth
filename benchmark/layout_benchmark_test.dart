@@ -4,6 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart' hide HitTester;
 import 'package:lm_smooth/lm_smooth.dart';
+import 'package:lm_smooth/src/core/layout_cache.dart';
+import 'package:lm_smooth/src/core/masonry_layout_engine.dart';
+import 'package:lm_smooth/src/core/spatial_index.dart';
+import 'package:lm_smooth/src/interaction/gesture_recognizer.dart';
+import 'package:lm_smooth/src/interaction/hit_tester.dart';
+import 'package:lm_smooth/src/rendering/smooth_sliver_grid_delegate.dart';
 
 /// Comprehensive performance benchmark suite for lm_smooth.
 ///

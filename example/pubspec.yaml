@@ -1,11 +1,10 @@
 name: lm_smooth_example
-description: Example app demonstrating lm_smooth library with 1M items.
+description: Example app for lm_smooth.
 publish_to: 'none'
-
 version: 1.0.0
 
 environment:
-  sdk: ^3.11.1
+  sdk: ">=3.4.0 <4.0.0"
 
 dependencies:
   flutter:
