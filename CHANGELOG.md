@@ -1,3 +1,8 @@
+## 0.1.1
+
+- Fixed the README screenshot URL for pub.dev rendering.
+- Added pub.dev screenshot metadata.
+
 ## 0.1.0
 
 Initial public release.

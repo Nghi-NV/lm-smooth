@@ -4,7 +4,7 @@ High-performance virtualized masonry views for Flutter.
 
 `lm_smooth` is built for feeds, dashboards, and device grids where item heights are known ahead of time. It avoids runtime child measurement, precomputes item geometry, and keeps scrolling predictable for large datasets.
 
-![lm_smooth example grid](doc/screenshots/example-grid.png)
+![lm_smooth example grid](https://raw.githubusercontent.com/Nghi-NV/lm-smooth/main/doc/screenshots/example-grid.png)
 
 ## Features
 
