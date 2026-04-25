@@ -1,6 +1,6 @@
 name: lm_smooth
 description: High-performance virtualized masonry grid for Flutter with known item extents, pinned sections, sessions, and drag reorder.
-version: 0.1.1
+version: 0.1.2
 homepage: https://github.com/Nghi-NV/lm-smooth
 repository: https://github.com/Nghi-NV/lm-smooth
 issue_tracker: https://github.com/Nghi-NV/lm-smooth/issues

@@ -28,13 +28,13 @@ Use `lm_smooth` when:
 - you need section headers, pinned headers, or scroll-state restore
 - you want predictable scroll performance over runtime measurement flexibility
 
-Use a runtime-measured staggered grid instead if item height depends on laying out unknown child content.
+This package is not a runtime measurement solution. It works best when item height is known before layout.
 
 ## Install
 
 ```yaml
 dependencies:
-  lm_smooth: ^0.1.0
+  lm_smooth: ^0.1.2
 ```
 
 ```dart
@@ -73,11 +73,11 @@ class DemoPage extends StatelessWidget {
 }
 ```
 
-## Migrating from `StaggeredGrid.count`
+## Using builder-based grids
 
-`StaggeredGrid.count(children: ...)` builds from a list of widgets and lets Flutter determine child size. `SmoothGrid` is different: it keeps performance predictable by requiring an extent for each item.
+For best performance, use `itemCount`, `itemBuilder`, and `itemExtentBuilder` instead of building a full list of child widgets up front. `SmoothGrid` keeps scrolling predictable by requiring the extent of each item before layout.
 
-Prefer the builder API:
+Example:
 
 ```dart
 SmoothGrid.count(
@@ -99,7 +99,7 @@ SmoothGrid.count(
 )
 ```
 
-Avoid passing a prebuilt `children` list for large collections. Builder-based usage preserves lazy construction and is the recommended path for performance.
+Builder-based usage preserves lazy construction and is the recommended path for large collections.
 
 ## Drag reorder
 

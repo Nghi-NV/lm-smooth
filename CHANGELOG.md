@@ -1,3 +1,8 @@
+## 0.1.2
+
+- Updated README wording to keep migration guidance package-neutral.
+- Updated install snippet to the latest published version.
+
 ## 0.1.1
 
 - Fixed the README screenshot URL for pub.dev rendering.
