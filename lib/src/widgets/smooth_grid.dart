@@ -329,7 +329,7 @@ class _SmoothSectionedGridState extends State<SmoothSectionedGrid> {
               )
             : widget.headerBuilder(context, sectionIndex),
       ),
-      _SmoothGridSliver(
+      SmoothSliverGrid(
         key: ValueKey('smooth_section_${section.id}'),
         itemCount: section.itemCount,
         itemBuilder: (context, itemIndex) =>
@@ -506,7 +506,7 @@ class _SmoothGridState extends State<SmoothGrid> with TickerProviderStateMixin {
       shrinkWrap: widget.shrinkWrap,
       cacheExtent: widget.cacheExtent,
       slivers: [
-        _SmoothGridSliver(
+        SmoothSliverGrid(
           key: _sliverKey,
           itemCount: widget.itemCount,
           itemBuilder: _buildItem,
@@ -1249,13 +1249,19 @@ class _GhostFrame extends StatelessWidget {
   }
 }
 
-class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
+/// A sliver variant of [SmoothGrid] for composition inside an existing
+/// [CustomScrollView].
+///
+/// Unlike `SmoothGrid(shrinkWrap: true)`, this keeps child construction tied to
+/// the parent viewport and preserves virtualization when mixed with other
+/// slivers.
+class SmoothSliverGrid extends SliverMultiBoxAdaptorWidget {
   final SmoothGridDelegate gridDelegate;
   final int itemCount;
   final ChildIndexGetter? findChildIndexCallback;
   final bool? useIsolate;
 
-  _SmoothGridSliver({
+  SmoothSliverGrid({
     super.key,
     required this.itemCount,
     required IndexedWidgetBuilder itemBuilder,
@@ -1265,6 +1271,36 @@ class _SmoothGridSliver extends SliverMultiBoxAdaptorWidget {
     required bool addAutomaticKeepAlives,
     this.useIsolate,
   }) : super(
+          delegate: SliverChildBuilderDelegate(
+            itemBuilder,
+            childCount: itemCount,
+            findChildIndexCallback: findChildIndexCallback,
+            addRepaintBoundaries: addRepaintBoundaries,
+            addAutomaticKeepAlives: addAutomaticKeepAlives,
+          ),
+        );
+
+  SmoothSliverGrid.count({
+    super.key,
+    required this.itemCount,
+    required IndexedWidgetBuilder itemBuilder,
+    this.findChildIndexCallback,
+    required int crossAxisCount,
+    double mainAxisSpacing = 0,
+    double crossAxisSpacing = 0,
+    EdgeInsets padding = EdgeInsets.zero,
+    required SmoothItemExtentBuilder itemExtentBuilder,
+    bool addRepaintBoundaries = true,
+    bool addAutomaticKeepAlives = false,
+    this.useIsolate,
+  })  : gridDelegate = SmoothGridDelegateWithFixedCount(
+          crossAxisCount: crossAxisCount,
+          mainAxisSpacing: mainAxisSpacing,
+          crossAxisSpacing: crossAxisSpacing,
+          padding: padding,
+          itemExtentBuilder: itemExtentBuilder,
+        ),
+        super(
           delegate: SliverChildBuilderDelegate(
             itemBuilder,
             childCount: itemCount,

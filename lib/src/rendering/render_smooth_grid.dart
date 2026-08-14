@@ -814,23 +814,16 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
 
     var child = lastChild;
     while (child != null) {
-      final data = child.parentData! as SmoothGridParentData;
       final index = indexOf(child);
       if (index == _hiddenIndex) {
         child = childBefore(child);
         continue;
       }
-      final preview = _previewOffsets[index] ?? Offset.zero;
-      final mainAxisDelta =
-          data.layoutOffset! - constraints.scrollOffset + preview.dy;
-      final childCrossAxis =
-          crossAxisPosition - data.crossAxisOffset - preview.dx;
-
       if (hitTestBoxChild(
         BoxHitTestResult.wrap(result),
         child,
-        mainAxisPosition: mainAxisPosition - mainAxisDelta,
-        crossAxisPosition: childCrossAxis,
+        mainAxisPosition: mainAxisPosition,
+        crossAxisPosition: crossAxisPosition,
       )) {
         return true;
       }
@@ -846,15 +839,11 @@ class RenderSmoothGrid extends RenderSliverMultiBoxAdaptor {
   }) {
     var child = lastChild;
     while (child != null) {
-      final data = child.parentData! as SmoothGridParentData;
-      final mainAxisDelta = data.layoutOffset! - constraints.scrollOffset;
-      final childCrossAxis = crossAxisPosition - data.crossAxisOffset;
-
       if (hitTestBoxChild(
         BoxHitTestResult.wrap(result),
         child,
-        mainAxisPosition: mainAxisPosition - mainAxisDelta,
-        crossAxisPosition: childCrossAxis,
+        mainAxisPosition: mainAxisPosition,
+        crossAxisPosition: crossAxisPosition,
       )) {
         return true;
       }
