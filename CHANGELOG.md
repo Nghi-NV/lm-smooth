@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.3
 
 - Fixed sliver child hit testing for items with nonzero main- or cross-axis offsets.
 - Added `SmoothSliverGrid` for composing a virtualized grid in an existing `CustomScrollView`.
